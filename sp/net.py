@@ -157,7 +157,7 @@ class SpNet(nn.Module):
                     else:
                         isfirst = False
                     for j in self.next_layers[i]:
-                        print('passive', self.net[j].module.weight.shape)
+                        print('spffn_passive_grow', self.net[j].module.weight.shape)
                         self.net[j].spffn_passive_grow(split_idx, new_idx)
 
         else:

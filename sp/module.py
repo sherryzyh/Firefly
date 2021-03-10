@@ -60,7 +60,7 @@ class SpModule(nn.Module):
 
     def get_device(self):
         try:
-            return 'cuda' if self.module.weight.data.is_cuda else 'cpu'
+            return self.module.weight.data.device if self.module.weight.data.is_cuda else 'cpu'
         except:
             raise Exception('[ERROR] no module initialized')
 

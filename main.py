@@ -43,7 +43,7 @@ def test(testloader, model):
     correct = 0
     total = 1e-40
     for x, y in testloader:
-        x = x.cuda(); y
+        x = x.to(config.device); y
         y_ = model.classify(x).detach().cpu()
         correct += (y == y_).float().sum().item()
         total += x.shape[0]
@@ -57,7 +57,7 @@ def run(trainset, trainloader, testloader, config):
     torch.cuda.manual_seed_all(config.seed)
     np.random.seed(config.seed)
 
-    exp_name = "experiment_%s_%s_initdim%d_seed%d_grow%f_gra%d_alpha3_new" % (
+    exp_name = "exp_%s_%s_initdim%d_seed%d_grow%.3f_gra%d_alpha3_new" % (
             config.dataset,
             config.method,
             config.dim_hidden,
@@ -118,8 +118,8 @@ def run(trainset, trainloader, testloader, config):
             stats['train_loss'].append(loss)
             stats['test_accuracy'].append(test_acc)
 
-            if epoch % 5 == 0:
-                print("[INFO] Round %d Epoch %05d | Training loss is %10.4f | Test accuracy is %10.4f" % (round, epoch, loss, test_acc))
+            if epoch % 20 == 0:
+                print("[INFO] Round %d Epoch %03d | Training loss is %10.4f | Test accuracy is %10.4f" % (round, epoch, loss, test_acc))
 
             if epoch == config.n_epochs // 2 - 1:
                 model.decay_lr(0.1)
@@ -196,9 +196,9 @@ if __name__ == "__main__":
         testset = torchvision.datasets.MNIST(root='../../ButterFly/data', train=False, download=True, transform=transform_test)
         testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=4)
     elif config.dataset == 'cifar10':
-        trainset = torchvision.datasets.CIFAR10(root='../../ButterFly/data', train=True, download=True, transform=transform_train)
+        trainset = torchvision.datasets.CIFAR10(root='../data', train=True, download=False, transform=transform_train)
         trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=4)
-        testset = torchvision.datasets.CIFAR10(root='../../ButterFly/data', train=False, download=True, transform=transform_test)
+        testset = torchvision.datasets.CIFAR10(root='../data', train=False, download=False, transform=transform_test)
         testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=4)
     elif config.dataset == 'cifar100':
         trainset = torchvision.datasets.CIFAR100(root='../../ButterFly/data', train=True, download=True, transform=transform_train)

@@ -219,6 +219,8 @@ class Conv2d(SpModule):
             self.y.grad = None
 
     def spffn_forward(self, x, alpha=-1):
+        # print("x.size = {}, x.device = {}" .format(x.size(), x.device))
+        # print("self.module = {}" .format(str(self.module)))
         out = self.module(x) # [out+eout, in+ein, H, W]
 
         patches = self.get_conv_patches(x)

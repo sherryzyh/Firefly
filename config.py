@@ -4,7 +4,7 @@ import numpy as np
 class Config:
     def __init__(self):
         self.parser = argparse.ArgumentParser()
-        self.device = 'cuda'
+        # self.device = 'cuda'
 
         self.lr = 1e-3
         self.max_split_iters = 3
@@ -33,9 +33,12 @@ class Config:
         self.parser.add_argument('--weight_decay', default=1e-4, type=float, help='l2 regularization')
         self.parser.add_argument('--momentum', default=0.9, type=float, help='sgd momentum')
         self.parser.add_argument('--n_elites', default=5, type=int, help='number of added neurons per split')
+        self.parser.add_argument('--n_epochs', default=160, type=int, help='number of training epochs in each round before split')
         self.parser.add_argument('--grow_ratio', default=0.35, type=float, help='number of added neurons per split')
         self.parser.add_argument('--alpha', default=0.3, type=float, help='alpha')
         self.parser.add_argument('--load_round', default=0, type=int, help='round to load')
+        self.parser.add_argument('--gpu', default='0', type=str, help="cuda devices")
+
         args = self.parser.parse_args()
 
         self.dataset = args.data
@@ -52,13 +55,14 @@ class Config:
         self.lr = args.lr
         self.weight_decay = args.weight_decay
         self.n_elites = args.n_elites
-        self.n_epochs = 160
+        self.n_epochs = args.n_epochs
         self.dim_hidden = args.dim_hidden
         self.momentum = args.momentum
         self.grow_ratio = args.grow_ratio
         self.seed = args.seed
         self.load_round = args.load_round
         self.resume = False if args.load_round == 0 else True
+        self.device = f"cuda:{args.gpu}"
         
         if self.dataset == 'mnist':
             self.dim_input = 784
@@ -83,4 +87,7 @@ class Config:
             print("          dim_input: %s" % str(self.dim_input))
             print("          dim_hidden: %d" % self.dim_hidden)
             print("          dim_output: %d" % self.dim_output)
+            print("       4. device")
+            print("          %s" % str(self.device))
+            
             print("="*80)
