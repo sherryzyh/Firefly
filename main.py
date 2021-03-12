@@ -50,6 +50,36 @@ def test(testloader, model):
     model.train()
     return correct / total
 
+# def run_summary(trainset, trainloader, testloader, config):
+#     check_path('./img')
+
+#     torch.manual_seed(config.seed)
+#     torch.cuda.manual_seed_all(config.seed)
+#     np.random.seed(config.seed)
+
+#     exp_name = config.expname
+#     load_path = config.load
+#     load_round = config.load_round
+
+#     for round in range(load_round, config.n_rounds + 1):
+#         stats = np.load("checkpoint/%s/roundfull_%d_%s.npy" % (load_path, round, exp_name), allow_pickle=True)
+#         stats = stats.tolist()
+#         # model = Classifier(config, stats['cfg']).to(config.device)
+#         print("==> stats: ")
+#         print("          ", stats)
+#         model = Classifier(config).to(config.device)
+#         ckpt = torch.load("checkpoint/%s/roundfull_%d_%s.pt" % (load_path, round, exp_name))
+#         model.load_state_dict(ckpt)
+
+#         print('-'*80)
+#         print('[INFO]  Round %d model' % round)
+#         print('        Configuration: %s' % model.get_cfg())
+#         print('        Trainable parameter number: %d' % model.get_num_params())
+#         print('        Test accuracy = %.4f\%' %stats['test_accuracy'])
+
+#     print('-'*40 + ' END ' + '-'*40)
+
+
 def run(trainset, trainloader, testloader, config):
     check_path('./img')
 
@@ -64,21 +94,27 @@ def run(trainset, trainloader, testloader, config):
             config.seed,
             config.grow_ratio,
             config.granularity)
+    log = config.log
+
 
     config.resume = False
     if config.resume:
-        load_round = config.load_round
-        stats = np.load("stats/round_%d_%s.npy" % (load_round, exp_name), allow_pickle=True)
-        stats = stats.tolist()
-        model = Classifier(config, stats['cfg']).to(config.device)
-        ckpt = torch.load("stats/round_%d_%s.pt" % (load_round, exp_name))
-        model.load_state_dict(ckpt)
-
+        # load_round = config.load_round
+        # stats = np.load("stats/round_%d_%s.npy" % (load_round, exp_name), allow_pickle=True)
+        # stats = stats.tolist()
+        # model = Classifier(config, stats['cfg']).to(config.device)
+        # ckpt = torch.load("stats/round_%d_%s.pt" % (load_round, exp_name))
+        # model.load_state_dict(ckpt)
+        pass
     else:
-        model = Classifier(config).to(config.device)
+        model = Classifier(config).to(config.device) # -> model.py
         if config.verbose:
-            print('[INFO] initial model trainable parameter number: %d' % model.get_num_params())
-
+            params = model.get_num_params()
+            cfg = model.get_cfg()
+            log.info('[INFO] Initial model #params: %10d' %(params))
+            log.info('[INFO] Initial model configuration: [{}]' .format(', '.join(map(str, cfg))))
+            log.info("[INFO] Split method: {}" .format(str(config.method)))
+            log.info("="*80)
 
         stats = {
             'train_loss': [],
@@ -96,17 +132,11 @@ def run(trainset, trainloader, testloader, config):
                     stats['widths'][i] = 0
 
     n_batches = len(trainloader)
-    print("[INFO] Split method: ", config.method)
-
-    if config.resume:
-        load_round = config.load_round
-        ckpt = torch.load("checkpoint/roundfull_%d_%s.pt" % (load_round, exp_name))
-        model.load_state_dict(ckpt)
-        print('load succ')
     
     load_round = config.load_round
-    for round in range(load_round, 10 + 1):
-        for epoch in range(1, config.n_epochs+1):
+    for round in range(load_round, config.n_rounds):
+        start_time = time.time()
+        for epoch in range(1, config.n_epochs + 1):
             if round <= load_round and config.resume:
                 break
             loss = 0.
@@ -128,13 +158,16 @@ def run(trainset, trainloader, testloader, config):
                 model.decay_lr(0.1)
 
             if epoch % 20 == 0 or epoch == config.n_epochs:
-                np.save("checkpoint/%s.npy" % exp_name, stats)
+                np.save("checkpoint/%s/%s.npy" % (config.save, exp_name), stats)
+                torch.save(model.state_dict(), "checkpoint/%s/%s.pt" % (config.save, exp_name))
 
-            if epoch % 20 == 0 or epoch == config.n_epochs:
-                torch.save(model.state_dict(), "checkpoint/%s.pt" % exp_name)
+            if epoch == config.n_epochs:
+                log.info("[INFO] Round %d:" % round)
+                log.info("[INFO] Training takes %10.4f sec | Training loss is %10.4f | Test accuracy is %10.4f" % ((time.time() - start_time), loss, test_acc))
 
-        np.save("checkpoint/roundfull_%d_%s.npy" % (round, exp_name), stats)
-        torch.save(model.state_dict(), "checkpoint/roundfull_%d_%s.pt" % (round, exp_name))
+        np.save("checkpoint/%s/round_%d_%s.npy" % (config.save, round, exp_name), stats)
+        torch.save(model.state_dict(), "checkpoint/%s/round_%d_%s.pt" % (config.save, round, exp_name))
+        
 
         if config.method != 'none':
             # Grow the network use NASH
@@ -161,11 +194,13 @@ def run(trainset, trainloader, testloader, config):
                 del bestmodel
                 print('Search Time', time.time() - rtime)
             else:
-                n_neurons = model.split(config.method, trainset)
-
-            print('Current parameter size' , model.get_num_params())
-            CFG = model.get_cfg()
-            print('Current cfg', model.get_cfg())
+                n_neurons, splittime = model.split(config.method, trainset)
+            
+            log.info("[INFO] Splitting takes %10.4f sec" % splittime)
+            params = model.get_num_params()
+            cfg = model.get_cfg()
+            log.info('[INFO] Current #params: %10d' %(params))
+            log.info('[INFO] Current configuration: [{}]' .format(', '.join(map(str, cfg))))
             model.set_lr(0.1)
             lr = 0.1
             model.create_optimizer()
@@ -174,8 +209,8 @@ if __name__ == "__main__":
     config = Config()
     if not os.path.exists('stats'):
         os.makedirs('stats')
-    if not os.path.exists('checkpoint'):
-        os.makedirs('checkpoint')
+    if not os.path.exists('checkpoint/%s/' % config.save):
+        os.makedirs('checkpoint/%s/' % config.save)
     mean = np.array([0.4914, 0.4822, 0.4465])
     std = np.array([0.2470, 0.2435, 0.2616])
 

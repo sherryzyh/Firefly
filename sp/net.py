@@ -175,14 +175,14 @@ class SpNet(nn.Module):
         self.clear() # cleanup auxiliaries
         self.create_optimizer() # re-initialize optimizer
 
-        end_time = time.time()
+        splittime = time.time() - start_time
         if self.verbose:
             print('[INFO] splitting takes %10.4f sec. Threshold value is %10.9f' % (
-                end_time - start_time, threshold))
+                splittime, threshold))
             if split_method == 'fireflyn':
                 print('[INFO] number of added neurons: \n%s\n' % \
                         '\n'.join(['-- %d grows (sp %d | new %d)' % (x, y1, y2) for x, (y1, y2) in n_neurons_added.items()]))
             else:
                 print('[INFO] number of added neurons: \n%s\n' % \
                         '\n'.join(['-- %d grows %d neurons' % (x, y) for x, y in n_neurons_added.items()]))
-        return n_neurons_added
+        return n_neurons_added, splittime
