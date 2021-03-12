@@ -1,4 +1,10 @@
 __pycache__/
-checkpoint/
 sp/__pycache__/
+
+
+checkpoint/
+bi/
+
 *.out
+*.bash
+*.md

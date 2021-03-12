@@ -50,36 +50,6 @@ def test(testloader, model):
     model.train()
     return correct / total
 
-# def run_summary(trainset, trainloader, testloader, config):
-#     check_path('./img')
-
-#     torch.manual_seed(config.seed)
-#     torch.cuda.manual_seed_all(config.seed)
-#     np.random.seed(config.seed)
-
-#     exp_name = config.expname
-#     load_path = config.load
-#     load_round = config.load_round
-
-#     for round in range(load_round, config.n_rounds + 1):
-#         stats = np.load("checkpoint/%s/roundfull_%d_%s.npy" % (load_path, round, exp_name), allow_pickle=True)
-#         stats = stats.tolist()
-#         # model = Classifier(config, stats['cfg']).to(config.device)
-#         print("==> stats: ")
-#         print("          ", stats)
-#         model = Classifier(config).to(config.device)
-#         ckpt = torch.load("checkpoint/%s/roundfull_%d_%s.pt" % (load_path, round, exp_name))
-#         model.load_state_dict(ckpt)
-
-#         print('-'*80)
-#         print('[INFO]  Round %d model' % round)
-#         print('        Configuration: %s' % model.get_cfg())
-#         print('        Trainable parameter number: %d' % model.get_num_params())
-#         print('        Test accuracy = %.4f\%' %stats['test_accuracy'])
-
-#     print('-'*40 + ' END ' + '-'*40)
-
-
 def run(trainset, trainloader, testloader, config):
     check_path('./img')
 
@@ -107,7 +77,7 @@ def run(trainset, trainloader, testloader, config):
         # model.load_state_dict(ckpt)
         pass
     else:
-        model = Classifier(config).to(config.device) # -> model.py
+        model = Classifier(config).to(config.device)
         if config.verbose:
             params = model.get_num_params()
             cfg = model.get_cfg()
@@ -136,34 +106,41 @@ def run(trainset, trainloader, testloader, config):
     load_round = config.load_round
     for round in range(load_round, config.n_rounds):
         start_time = time.time()
+        traindone = False
         for epoch in range(1, config.n_epochs + 1):
             if round <= load_round and config.resume:
                 break
             loss = 0.
-            for i, (x, y) in enumerate(trainloader):
-                inputs = x.to(config.device); targets = y.to(config.device)
+            for i, (inputs, targets) in enumerate(trainloader):
+                # if config.debug and i > 50:
+                #     traindone = True
+                #     break
+                inputs = inputs.to(config.device)
+                targets = targets.to(config.device)
                 loss += model.update(inputs, targets)
             loss /= n_batches
             test_acc = test(testloader, model)
             stats['train_loss'].append(loss)
             stats['test_accuracy'].append(test_acc)
 
-            if epoch % 20 == 0:
-                print("[INFO] Round %d Epoch %03d | Training loss is %10.4f | Test accuracy is %10.4f" % (round, epoch, loss, test_acc))
+            if epoch == config.n_epochs:
+                traindone = True
 
+            # adjust learning rate
             if epoch == config.n_epochs // 2 - 1:
                 model.decay_lr(0.1)
-
             if epoch == config.n_epochs // 4 * 3 - 1:
                 model.decay_lr(0.1)
 
-            if epoch % 20 == 0 or epoch == config.n_epochs:
+            if epoch % 20 == 0 or traindone:
+                print("[INFO] Round %d Epoch %03d | Training loss is %10.4f | Test accuracy is %10.4f" % (
+                round, epoch, loss, test_acc))
                 np.save("checkpoint/%s/%s.npy" % (config.save, exp_name), stats)
                 torch.save(model.state_dict(), "checkpoint/%s/%s.pt" % (config.save, exp_name))
 
-            if epoch == config.n_epochs:
+            if traindone:
                 log.info("[INFO] Round %d:" % round)
-                log.info("[INFO] Training takes %10.4f sec | Training loss is %10.4f | Test accuracy is %10.4f" % ((time.time() - start_time), loss, test_acc))
+                log.info("[INFO] Training takes %10.4f sec | Training loss: %10.4f | Test accuracy: %10.4f" % ((time.time() - start_time), loss, test_acc))
 
         np.save("checkpoint/%s/round_%d_%s.npy" % (config.save, round, exp_name), stats)
         torch.save(model.state_dict(), "checkpoint/%s/round_%d_%s.pt" % (config.save, round, exp_name))
@@ -195,8 +172,9 @@ def run(trainset, trainloader, testloader, config):
                 print('Search Time', time.time() - rtime)
             else:
                 n_neurons, splittime = model.split(config.method, trainset)
-            
-            log.info("[INFO] Splitting takes %10.4f sec" % splittime)
+
+            test_acc = test(testloader, model)
+            log.info("[INFO] Splitting takes %10.4f sec | Test accuracy after splitting: %10.4f" % (splittime, test_acc))
             params = model.get_num_params()
             cfg = model.get_cfg()
             log.info('[INFO] Current #params: %10d' %(params))

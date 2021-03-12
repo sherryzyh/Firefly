@@ -172,9 +172,12 @@ class Conv2d(SpModule):
 
     def spffn_penalty(self):
         penalty = 0.
-        if self.can_split: penalty += self.v.pow(2).sum()
-        if self.eout > 0: penalty += 1e-2 * self.vno.pow(2).sum()
-        if penalty > 0: (penalty * 1e-2).backward()
+        if self.can_split:
+            penalty += self.v.pow(2).sum()
+        if self.eout > 0:
+            penalty += 1e-2 * self.vno.pow(2).sum()
+        if penalty > 0:
+            (penalty * 1e-2).backward()
 
     def spffn_clip(self):
         if self.ein > 0: # since output is just 1
@@ -542,16 +545,22 @@ class Conv2d(SpModule):
 
     def spffn_active_grow(self, threshold):
         idx = torch.nonzero((self.w <= threshold).float()).view(-1)
+        print("self.w = ", self.w.size())
+        print("nonzero w index: ", idx)
 
         C_out, C_in, kh, kw = self.module.weight.shape
         c1 = C_out - self.eout
         c3 = C_in - self.ein
+        print("C_out = {}, C_in = {}, c1(orig out) = {}, c3(orig in) = {}" .format(C_out, C_in, c1, c3))
 
         split_idx, new_idx = idx[idx < c1], idx[idx >= c1]
         n_split = split_idx.shape[0]
         n_new = new_idx.shape[0]
+        print("split idx: ", split_idx)
+        print("new idx: ", new_idx)
 
         c2 = c1 + n_split
+        print("c2(split out) = ", c2)
 
         device = self.get_device()
         delta = self.v[split_idx, ...]
@@ -565,6 +574,7 @@ class Conv2d(SpModule):
 
         # for current layer [--original--c1--split_new--c2--add new--]
         old_W = self.module.weight.data.clone()
+        print("old W.size = ", old_W.size())
 
         try:
             old_W[:, C_in - self.ein:, :, :] = self.vni.clone()
@@ -576,6 +586,8 @@ class Conv2d(SpModule):
             pass
 
         new_layer.weight.data[:c1, ...] = old_W[:c1,...]
+        print("newlayer weight.size = ", new_layer.weight.data.size())
+
 
         if n_split > 0:
             new_layer.weight.data[c1:c2, ...] = old_W[split_idx, ...]

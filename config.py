@@ -34,7 +34,7 @@ class Config:
         self.parser.add_argument('--weight_decay', default=1e-4, type=float, help='l2 regularization')
         self.parser.add_argument('--momentum', default=0.9, type=float, help='sgd momentum')
         self.parser.add_argument('--n_rounds', default=10, type=int, help='number of growing round')
-        self.parser.add_argument('--n_elites', default=5, type=int, help='number of added neurons per split')
+        # self.parser.add_argument('--n_elites', default=5, type=int, help='number of added neurons per split')
         self.parser.add_argument('--n_epochs', default=160, type=int, help='number of training epochs in each round before split')
         self.parser.add_argument('--grow_ratio', default=0.35, type=float, help='number of added neurons per split')
         self.parser.add_argument('--alpha', default=0.3, type=float, help='alpha')
@@ -42,10 +42,9 @@ class Config:
         self.parser.add_argument('--gpu', default='0', type=str, help="cuda devices")
         self.parser.add_argument('--save', default='default', type=str, help="save folder path")
 
-        # #################### Experiment Summary ####################
-        # self.parser.add_argument('--summary', default=False, dest='summary', action='store_true')
-        # self.parser.add_argument('--load', default="default", type=str, help="load models folder path")
-        # self.parser.add_argument('--expname', default="exp", type=str, help="load experiment names")
+
+        self.parser.add_argument('--debug', default=False, dest='debug', action='store_true')
+        self.parser.add_argument('--bi', default=False, dest='bi', action='store_true')
 
         args = self.parser.parse_args()
 
@@ -63,7 +62,7 @@ class Config:
         self.lr = args.lr
         self.weight_decay = args.weight_decay
         self.n_rounds = args.n_rounds
-        self.n_elites = args.n_elites
+        # self.n_elites = args.n_elites
         self.n_epochs = args.n_epochs
         self.dim_hidden = args.dim_hidden
         self.momentum = args.momentum
@@ -88,13 +87,12 @@ class Config:
             self.dim_input = (3, 32, 32)
             self.dim_output = 100
 
-        # self.exp_name = "exp_%s_%s_initdim%d_seed%d_grow%.3f_gra%d_alpha3_new" % (
-        #     self.dataset,
-        #     self.method,
-        #     self.dim_hidden,
-        #     self.seed,
-        #     self.grow_ratio,
-        #     self.granularity)
+
+        self.debug = args.debug
+        if self.debug:
+            self.save = 'debug'
+            self.n_epochs = 5
+            self.n_rounds = 1
 
         #########################################################
         self.logpath = "checkpoint/summary_%s.log" %self.save
@@ -136,5 +134,6 @@ class Config:
             log.info("          model: %s" % self.model)
             log.info("       4. device")
             log.info("          %s" % str(self.device))
-            
+            if self.debug:
+                log.info("[INFO] -- In Debug Mode --")
             log.info("="*80)

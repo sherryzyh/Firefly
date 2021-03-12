@@ -1,9 +1,9 @@
 
 # Firefly Neural Architecture Descent: a General Approach for Growing Neural Networks
 
-This repository is the official implementation of Firefly Neural Architecture Descent: a General Approach for Growing Neural Networks
-
-This work is received by NeurIPS 2020.
+This repository is not the official implementation of Firefly Neural Architecture Descent: a General Approach for Growing Neural Networks.
+[paper link](https://arxiv.org/pdf/2102.08574.pdf)
+[official codes](https://github.com/klightz/Firefly)
 
 ## Requirements
 
@@ -20,5 +20,8 @@ python main.py --method fireflyn --model vgg19
 
 You can also try different growing method [exact/fast/fireflyn/random] which represent original splitting, fast splitting, firefly splitting, NASH described in the paper.
 
-## TODO
-Detail tutorial and more experiments in the paper are under construction, will release in the future.
+## Improvement in this repo
+
+- Any cuda device is allowed when assigned.
+- A summary log file after training.
+- Allow binary convolution in training.
