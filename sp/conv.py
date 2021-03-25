@@ -9,6 +9,7 @@ from torch.distributions import Normal
 from torch.optim import *
 from .module import SpModule
 
+
 ###############################################################################
 #
 # Conv2d Split Layer
@@ -17,17 +18,17 @@ from .module import SpModule
 
 class Conv2d(SpModule):
     def __init__(self,
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride=1,
-            padding=1,
-            groups = 1,
-            can_split=True,
-            bias=True,
-            actv_fn='relu',
-            has_bn=False,
-            rescale=1.0):
+                 in_channels,
+                 out_channels,
+                 kernel_size,
+                 stride=1,
+                 padding=1,
+                 groups=1,
+                 can_split=True,
+                 bias=True,
+                 actv_fn='relu',
+                 has_bn=False,
+                 rescale=1.0):
 
         super().__init__(can_split=can_split,
                          actv_fn=actv_fn,
@@ -60,11 +61,10 @@ class Conv2d(SpModule):
         self.module = nn.Conv2d(in_channels=in_channels,
                                 out_channels=out_channels,
                                 kernel_size=kernel_size,
-                                groups = groups,
+                                groups=groups,
                                 stride=stride,
                                 padding=padding,
                                 bias=self.has_bias)
-
 
     def get_conv_patches(self, x):
         x = F.pad(x, (self.pw, self.pw, self.ph, self.ph))  # pad (left, right, top, bottom)
@@ -90,8 +90,8 @@ class Conv2d(SpModule):
     def spf_update_v(self):
         v = self.v
         sv = self.y.grad
-        vv = v.pow(2).sum([1,2,3], keepdim=True)
-        vsv = (sv * v).sum([1,2,3], keepdim=True)
+        vv = v.pow(2).sum([1, 2, 3], keepdim=True)
+        vsv = (sv * v).sum([1, 2, 3], keepdim=True)
         v_grad = 2. * (sv * vv - v * vsv) / vv.pow(2)
         self.v.grad = v_grad
         self.y.grad = None
@@ -99,33 +99,33 @@ class Conv2d(SpModule):
     def spf_update_w(self, n=1.):
         v = self.v
         sv = self.y.grad
-        vv = v.pow(2).sum([1,2,3])
-        vsv = (sv * v).sum([1,2,3])
+        vv = v.pow(2).sum([1, 2, 3])
+        vsv = (sv * v).sum([1, 2, 3])
         self.w += (vsv / vv).data.clone() / n
 
     def spf_forward(self, x):
-        out = self.module(x) # [B, C_out]
+        out = self.module(x)  # [B, C_out]
         bn_coef = 1.
         if self.has_bn:
-            self.bn.eval() # fix running mean/variance
+            self.bn.eval()  # fix running mean/variance
             out = self.bn(out)
             # calculate bn_coef
             bn_coef = 1. / torch.sqrt(self.bn.running_var + 1e-5) * self.bn.weight
-            bn_coef = bn_coef.view(1, -1, 1, 1) # [1, C_out, 1, 1]
+            bn_coef = bn_coef.view(1, -1, 1, 1)  # [1, C_out, 1, 1]
 
         # normalize v
-        v_norm = self.v.pow(2).sum([1,2,3], keepdim=True).sqrt().data
+        v_norm = self.v.pow(2).sum([1, 2, 3], keepdim=True).sqrt().data
         self.v.data = self.v.data / v_norm
 
         patches = self.get_conv_patches(x)
         B, H, W, C_in, kh, kw = patches.size()
 
-        x = patches.reshape(B*H*W, -1)
+        x = patches.reshape(B * H * W, -1)
 
-        left = x.mm(self.y.view(-1, C_in*kh*kw).t()).view(B, H, W, -1).permute(0,3,1,2)
-        right = x.mm(self.v.view(-1, C_in*kh*kw).t()).view(B, H, W, -1).permute(0,3,1,2)
+        left = x.mm(self.y.view(-1, C_in * kh * kw).t()).view(B, H, W, -1).permute(0, 3, 1, 2)
+        right = x.mm(self.v.view(-1, C_in * kh * kw).t()).view(B, H, W, -1).permute(0, 3, 1, 2)
 
-        aux = self._d2_actv(out) * (bn_coef*left) * (bn_coef*right)
+        aux = self._d2_actv(out) * (bn_coef * left) * (bn_coef * right)
         out = self._activate(out) + aux
         return out
 
@@ -143,7 +143,7 @@ class Conv2d(SpModule):
             C_in = C_out
         device = self.get_device()
         if self.has_bn and self.eout > 0:
-            new_bn = nn.BatchNorm2d(C_out+self.eout).to(device)
+            new_bn = nn.BatchNorm2d(C_out + self.eout).to(device)
             new_bn.weight.data[:C_out] = self.bn.weight.data.clone()
             new_bn.bias.data[:C_out] = self.bn.bias.data.clone()
             new_bn.running_mean.data[:C_out] = self.bn.running_mean.data.clone()
@@ -154,12 +154,12 @@ class Conv2d(SpModule):
             self.bn.eval()
         if self.groups != 1:
             self.groups += self.K
-        new_layer = nn.Conv2d(in_channels=C_in+self.ein,
-                              out_channels=C_out+self.eout,
+        new_layer = nn.Conv2d(in_channels=C_in + self.ein,
+                              out_channels=C_out + self.eout,
                               kernel_size=(self.kh, self.kw),
                               stride=(self.dh, self.dw),
                               padding=(self.ph, self.pw),
-                              bias=self.has_bias, groups = self.groups).to(device)
+                              bias=self.has_bias, groups=self.groups).to(device)
 
         new_layer.weight.data[:C_out, :C_in, :, :] = self.module.weight.data.clone()
 
@@ -167,6 +167,16 @@ class Conv2d(SpModule):
             new_layer.weight.data[:, C_in:, :, :] = 0.
         if self.eout > 0:
             new_layer.weight.data[C_out:, :, :, :] = 0.
+
+        # print("="*80)
+        # print("old layer weight.size = {}, new layer weight.size = {}" .format(self.module.weight.size(), new_layer.weight.size()))
+        # print("-"*40)
+        # print("old layer weight:")
+        # print(self.module.weight.data)
+        # print("-"*40)
+        # print("new layer weight:")
+        # print(new_layer.weight.data)
+
         self.module = new_layer
         self.module.eval()
 
@@ -180,7 +190,7 @@ class Conv2d(SpModule):
             (penalty * 1e-2).backward()
 
     def spffn_clip(self):
-        if self.ein > 0: # since output is just 1
+        if self.ein > 0:  # since output is just 1
             self.vni.data.clamp_(-1e-2, 1e-2)
 
     def spffn_reset(self):
@@ -190,80 +200,133 @@ class Conv2d(SpModule):
             C_out, C_in, kh, kw = self.module.weight.data.shape
             C_in = C_out
         device = self.get_device()
-        self.y = nn.Parameter(torch.zeros(1,C_out,1,1)).to(device)
+        self.y = nn.Parameter(torch.zeros(1, C_out, 1, 1)).to(device)
         self.y.retain_grad()
         self.w = 0.
 
         if self.can_split:
-            v = torch.zeros(C_out-self.eout, C_in-self.ein,kh,kw).to(device)
+            v = torch.zeros(C_out - self.eout, C_in - self.ein, kh, kw).to(device)
             v.uniform_(-1e-1, 1e-1)
             self.v = nn.Parameter(v)
 
+        # if the input param is enlarged
         if self.ein > 0:
             vni = torch.zeros(C_out, self.ein, kh, kw).to(device)
             vni.uniform_(-1e-2, 1e-2)
             self.vni = nn.Parameter(vni)
 
+        # if the output param is enlarged
         if self.eout > 0:
-            vno = torch.zeros(self.eout, C_in-self.ein, kh, kw).to(device)
+            vno = torch.zeros(self.eout, C_in - self.ein, kh, kw).to(device)
             n = kh * kw * (C_in - self.ein)
             stdv = 1. / math.sqrt(n)
-            #vno.uniform_(-stdv, stdv)
+            # vno.uniform_(-stdv, stdv)
             vno.normal_(0, 0.1)
             self.vno = nn.Parameter(vno)
 
-    def spffn_update_w(self, d, output = False):
+    def spffn_update_w(self, d, output=False):
         if not output:
             self.w += (self.y.grad.data / d).view(-1)
             self.y.grad = None
         else:
             y_grad = grad(self.output.mean(), self.y)
-            self.w +=  (self.y.grad.data / y_grad[0].data / d).view(-1)
+            self.w += (self.y.grad.data / y_grad[0].data / d).view(-1)
             self.y.grad = None
 
-    def spffn_forward(self, x, alpha=-1):
-        # print("x.size = {}, x.device = {}" .format(x.size(), x.device))
-        # print("self.module = {}" .format(str(self.module)))
-        out = self.module(x) # [out+eout, in+ein, H, W]
+    def spffn_forward(self, x, splitlog, alpha=-1):
+        # x.size = [B, C_in, H, W]
+        out = self.module(x)  # [B, C_out(out+eout), H, W]
+        print("=" * 80)
+        print("=" * 80)
+        print(">> conv.spffn_forward:")
+        print("[INFO] input.size = ", x.size())
+        print("[INFO] out.size = ", out.size())
 
         patches = self.get_conv_patches(x)
+        print("       patches.size = ", patches.size())
         B, H, W, C_in, kh, kw = patches.size()
         C_out = out.shape[1]
         cin, cout = C_in - self.ein, C_out - self.eout
+        print("       self.ein = {}, cin.size = {}; self.eout = {}, cout.size = {}".format(self.ein, cin, self.eout,
+                                                                                           cout))
 
-        x = patches.view(B*H*W, -1, kh*kw)
+        x = patches.view(B * H * W, -1, kh * kw)  # [B*H*W, C_in(cin + self.ein), kh*kw]
 
+        # original codes
         if self.ein > 0:
-            x1, x2 = x[:,:cin,:].view(B*H*W, -1), x[:,cin:,:].view(B*H*W,-1)
+            # if expand input
+            x1, x2 = x[:, :cin, :].view(B * H * W, -1), x[:, cin:, :].view(B * H * W, -1)
+            # x1[B*H*W, cin*kh*kw], x2[B*H*W, self.ein*kh*kw]
         else:
-            x1 = x.view(B*H*W, -1)
+            x1 = x.view(B * H * W, -1)  # [B*H*W, C_in*kh*kw]
 
+        # noise_v:      the change in original parameters(theta matrix)
+        # noise_vno:    the change in params(cin, self.eout)
+        # noise_vi1:    the change in params(self.ein, cout)
+        # noise_vi2:    the change in params(self.ein, self.eout)
         if self.can_split:
-            noise_v = x1.mm(self.v.view(-1, cin*kh*kw).t()).view(B,H,W,-1).permute(0,3,1,2) # [B,cout,H,W]
+            # the noise_v is directly by matrix multiplication when alpha < 0,
+            #     it happens in the optimization step one, where epsilon and delta are altogether optimized
+            #     v matrix represents epsilon * delta
+            noise_v = x1.mm(self.v.view(-1, cin * kh * kw).t()).view(B, H, W, -1).permute(0, 3, 1, 2)  # [B,cout,H,W]
+            # print("noise_v:")
+            # print(noise_v)
             if alpha >= 0.:
-                noise_v = (noise_v.detach() * self.y[:,:cout,:,:] + noise_v * alpha)
+                # print("alpha = {}" .format(alpha))
+                # print("self.y:")
+                print(self.y[:, :cout, :, :])
+                noise_v = (noise_v.detach() * self.y[:, :cout, :, :] + noise_v * alpha)
+                # print("noise_v:")
+                # print(noise_v)
+            else:
+                print("alpha < 0")
 
         if self.eout > 0:
-            noise_vo = x1.mm(self.vno.view(-1, cin*kh*kw).t()).view(B,H,W,-1).permute(0,3,1,2)
+            noise_vo = x1.mm(self.vno.view(-1, cin * kh * kw).t()).view(B, H, W, -1).permute(0, 3, 1, 2)
+            # print("noise_vo:")
+            # print(noise_vo)
             if alpha >= 0.:
-                noise_vo = (noise_vo.detach() * self.y[:,cout:,:,:] + noise_vo * alpha)
+                noise_vo = (noise_vo.detach() * self.y[:, cout:, :, :] + noise_vo * alpha)
 
         if self.ein > 0:
-            noise_vi1 = x2.mm(self.vni.view(-1, self.ein*kh*kw).t())
+            noise_vi1 = x2.mm(self.vni.view(-1, self.ein * kh * kw).t())
             if self.eout > 0:
-                noise_vi1, noise_vi2 = noise_vi1[:,:cout], noise_vi1[:,cout:] # [B*H*W, cout/eout]
-                noise_vi1 = noise_vi1.view(B,H,W,-1).permute(0,3,1,2)
-                noise_vi2 = noise_vi2.view(B,H,W,-1).permute(0,3,1,2)
+                noise_vi1, noise_vi2 = noise_vi1[:, :cout], noise_vi1[:, cout:]  # [B*H*W, cout/eout]
+                noise_vi1 = noise_vi1.view(B, H, W, -1).permute(0, 3, 1, 2)
+                noise_vi2 = noise_vi2.view(B, H, W, -1).permute(0, 3, 1, 2)
+                # print("noise_vi1:")
+                print(noise_vi1)
+                # print("noise_vi2:")
+                print(noise_vi2)
             else:
-                noise_vi1 = noise_vi1.view(B,H,W,-1).permute(0,3,1,2)
+                noise_vi1 = noise_vi1.view(B, H, W, -1).permute(0, 3, 1, 2)
+                # print("noise_vi1:")
+                print(noise_vi1)
+                # print("no noise_vi2")
 
         o1_plus = o1_minus = o2 = 0.
-
+        # o1_plus, o1_minus: the output(before activ) of two new neurons when splitting
         if self.can_split:
-            o1_plus = out[:,:cout,:,:] + noise_v # [B, cout, H, W]
-            o1_minus = out[:,:cout,:,:] - noise_v # [B, cout, H, W]
+            print("[INFO] noise_v.size = ", noise_v.size())
+            # print("-"*80)
+            # print("original out:")
+            # print(out[:,:cout,:,:])
+            # print("-"*80)
+            # print("noise_v:")
+            # print(noise_v)
+            # print("-"*80)
+            o1_plus = out[:, :cout, :, :] + noise_v  # [B, cout, H, W]
+            o1_minus = out[:, :cout, :, :] - noise_v  # [B, cout, H, W]
+            print("[INFO] o1_plus.size = ", o1_plus.size())
+            print("[INFO] o1_minus.size = ", o1_minus.size())
+
+            # print("-"*80)
+            # print("o1_plus:")
+            # print(o1_plus)
+            # print("o1_minus:")
+            # print(o1_minus)
             if self.eout > 0:
-                o2 = out[:,cout:,:,:] + noise_vo
+                o2 = out[:, cout:, :, :] + noise_vo
             if self.ein > 0:
                 o1_plus = o1_plus + noise_vi1
                 o1_minus = o1_minus + noise_vi1
@@ -276,13 +339,30 @@ class Conv2d(SpModule):
             if self.has_bn:
                 o1_plus = self.bn(o1_plus)
                 o1_minus = self.bn(o1_minus)
+
+            print("=" * 80)
+            print("Finally")
+            print("=" * 80)
+
             o1_plus = self._activate(o1_plus)
             o1_minus = self._activate(o1_minus)
+            # print("-"*80)
+            # print("o1_plus:")
+            # print(o1_plus)
+            # print("o1_minus:")
+            # print(o1_minus)
+            # print("-"*80)
             output = (o1_plus + o1_minus) / 2.
+            orig = self._activate(out[:, :cout, :, :])
+            cha = output[0, 0, :, :] - orig[0, 0, :, :]
+            print("output - orig output:")
+            torch.set_printoptions(threshold=5)
+            print(cha)
+
         else:
-            o1 = out[:,:cout,:,:]
+            o1 = out[:, :cout, :, :]
             if self.eout > 0:
-                o2 = out[:,cout:,:,:] + noise_vo
+                o2 = out[:, cout:, :, :] + noise_vo
                 if self.ein > 0:
                     o2 = o2 + noise_vi2
             if self.ein > 0:
@@ -309,7 +389,7 @@ class Conv2d(SpModule):
         self.w = 0.
 
     def spff_update_w(self, d):
-        self.w += (self.y.grad.data/d).view(-1)
+        self.w += (self.y.grad.data / d).view(-1)
 
     def spff_scale_v(self):
         self.v.data = self.v.data * 1e2
@@ -319,14 +399,14 @@ class Conv2d(SpModule):
 
         patches = self.get_conv_patches(x)
         B, H, W, C_in, kh, kw = patches.size()
-        x = patches.view(B*H*W, -1)
+        x = patches.view(B * H * W, -1)
 
         if alpha >= 0.:
-            noise_out = x.mm(self.v.view(-1, C_in*kh*kw).t())
+            noise_out = x.mm(self.v.view(-1, C_in * kh * kw).t())
             noise_out = noise_out.view(B, H, W, -1).permute(0, 3, 1, 2)
             noise_out = (self.y * noise_out.detach() + noise_out * alpha)
         else:
-            noise_out = x.mm(self.v.view(-1, C_in*kh*kw).t())
+            noise_out = x.mm(self.v.view(-1, C_in * kh * kw).t())
             noise_out = noise_out.view(B, H, W, -1).permute(0, 3, 1, 2)
 
         out_plus = out + noise_out
@@ -346,19 +426,19 @@ class Conv2d(SpModule):
     # exact split
     ###########################################################################
     def spe_forward(self, x):
-        out = self.module(x) # [B, C_out, H, W]
+        out = self.module(x)  # [B, C_out, H, W]
 
         if self.has_bn:
-            self.bn.eval() # fix running mean/variance
+            self.bn.eval()  # fix running mean/variance
             out = self.bn(out)
             # calculate bn_coff
             bn_coff = 1. / torch.sqrt(self.bn.running_var + 1e-5) * self.bn.weight
-            bn_coff = bn_coff.view(1, -1, 1, 1) # [1, C_out, 1, 1]
+            bn_coff = bn_coff.view(1, -1, 1, 1)  # [1, C_out, 1, 1]
 
         first_run = (len(self.S) == 0)
 
         # calculate 2nd order derivative of the activation
-        nabla2_out = self._d2_actv(out) # [B, C_out, H, W]
+        nabla2_out = self._d2_actv(out)  # [B, C_out, H, W]
         patches = self.get_conv_patches(x)
         B, H, W, C_in, KH, KW = patches.size()
         C_out = out.shape[1]
@@ -367,34 +447,34 @@ class Conv2d(SpModule):
         x = patches.view(B, H, W, D)
 
         device = self.get_device()
-        auxs = [] # separate calculations for each neuron for space efficiency
+        auxs = []  # separate calculations for each neuron for space efficiency
         for neuron_idx in range(C_out):
-            c = bn_coff[:, neuron_idx:neuron_idx+1, :, :] if self.has_bn else 1.
+            c = bn_coff[:, neuron_idx:neuron_idx + 1, :, :] if self.has_bn else 1.
             l = c * x
             if first_run:
-                S = Variable(torch.zeros(D, D).to(device), requires_grad=True) # [H_in, H_in]
+                S = Variable(torch.zeros(D, D).to(device), requires_grad=True)  # [H_in, H_in]
                 self.S.append(S)
             else:
                 S = self.S[neuron_idx]
-            aux = l.view(-1, D).mm(S).unsqueeze(1).bmm(l.view(-1, D, 1)).squeeze(-1) # (Bx)S(Bx^T), [B*H*W,1]
+            aux = l.view(-1, D).mm(S).unsqueeze(1).bmm(l.view(-1, D, 1)).squeeze(-1)  # (Bx)S(Bx^T), [B*H*W,1]
             aux = aux.view(B, 1, H, W)
             auxs.append(aux)
 
-        auxs = torch.cat(auxs, 1) # [B, C_out, H, W]
-        auxs = auxs * nabla2_out # [B, C_out, H, W]
+        auxs = torch.cat(auxs, 1)  # [B, C_out, H, W]
+        auxs = auxs * nabla2_out  # [B, C_out, H, W]
         out = self._activate(out) + auxs
         return out
 
     def spe_eigen(self, avg_over=1.):
-        A = np.array([item.grad.data.cpu().numpy() for item in self.S]) # [C_out, D, D]
+        A = np.array([item.grad.data.cpu().numpy() for item in self.S])  # [C_out, D, D]
         A /= avg_over
         A = (A + np.transpose(A, [0, 2, 1])) / 2
-        w, v = np.linalg.eig(A) # [C_out, K], [C_out, D, K]
+        w, v = np.linalg.eig(A)  # [C_out, K], [C_out, D, K]
         w = np.real(w)
         v = np.real(v)
         min_idx = np.argmin(w, axis=1)
-        w_min = np.min(w, axis=1) # [C_out,]
-        v_min = v[np.arange(w_min.shape[0]), :, min_idx] # [C_out, D]
+        w_min = np.min(w, axis=1)  # [C_out,]
+        v_min = v[np.arange(w_min.shape[0]), :, min_idx]  # [C_out, D]
         self.w = w_min
         self.v = v_min
         device = self.get_device()
@@ -423,7 +503,7 @@ class Conv2d(SpModule):
         idx = torch.LongTensor(idx).to(device)
 
         new_layer = nn.Conv2d(in_channels=C_in,
-                              out_channels=C_out+C_new,
+                              out_channels=C_out + C_new,
                               kernel_size=(self.kh, self.kw),
                               stride=(self.dh, self.dw),
                               padding=(self.ph, self.pw),
@@ -443,7 +523,7 @@ class Conv2d(SpModule):
 
         # for batchnorm layer
         if self.has_bn:
-            new_bn = nn.BatchNorm2d(C_out+C_new).to(device)
+            new_bn = nn.BatchNorm2d(C_out + C_new).to(device)
             new_bn.weight.data[:C_out] = self.bn.weight.data.clone()
             new_bn.weight.data[C_out:] = self.bn.weight.data[idx]
             new_bn.bias.data[:C_out] = self.bn.bias.data.clone()
@@ -459,7 +539,7 @@ class Conv2d(SpModule):
         C_out, C_in, kh, kw = self.module.weight.shape
         device = self.get_device()
         new_layer = nn.Conv2d(in_channels=C_in,
-                              out_channels=C_out+1,
+                              out_channels=C_out + 1,
                               kernel_size=(self.kh, self.kw),
                               stride=(self.dh, self.dw),
                               padding=(self.ph, self.pw),
@@ -470,13 +550,13 @@ class Conv2d(SpModule):
     def rdinit_grow_input(self):
         C_out, C_in, kh, kw = self.module.weight.shape
         device = self.get_device()
-        new_layer = nn.Conv2d(in_channels=C_in+1,
+        new_layer = nn.Conv2d(in_channels=C_in + 1,
                               out_channels=C_out,
                               kernel_size=(self.kh, self.kw),
                               stride=(self.dh, self.dw),
                               padding=(self.ph, self.pw),
                               bias=self.has_bias).to(device)
-        new_layer.weight.data[:,:C_in, ...] = self.module.weight.data.clone()
+        new_layer.weight.data[:, :C_in, ...] = self.module.weight.data.clone()
         self.module = new_layer
 
     def active_split(self, threshold):
@@ -493,7 +573,7 @@ class Conv2d(SpModule):
         delta = delta.view(C_new, C_in, kh, kw)
 
         new_layer = nn.Conv2d(in_channels=C_in,
-                              out_channels=C_out+C_new,
+                              out_channels=C_out + C_new,
                               kernel_size=(self.kh, self.kw),
                               stride=(self.dh, self.dw),
                               padding=(self.ph, self.pw),
@@ -513,7 +593,7 @@ class Conv2d(SpModule):
 
         # for batchnorm layer
         if self.has_bn:
-            new_bn = nn.BatchNorm2d(C_out+C_new).to(device)
+            new_bn = nn.BatchNorm2d(C_out + C_new).to(device)
             new_bn.weight.data[:C_out] = self.bn.weight.data.clone()
             new_bn.weight.data[C_out:] = self.bn.weight.data[idx]
             new_bn.bias.data[:C_out] = self.bn.bias.data.clone()
@@ -529,7 +609,7 @@ class Conv2d(SpModule):
         C_new = idx.shape[0]
         C_out, C_in, _, _ = self.module.weight.shape
         device = self.get_device()
-        new_layer = nn.Conv2d(in_channels=C_in+C_new,
+        new_layer = nn.Conv2d(in_channels=C_in + C_new,
                               out_channels=C_out,
                               kernel_size=(self.kh, self.kw),
                               stride=(self.dh, self.dw),
@@ -545,28 +625,28 @@ class Conv2d(SpModule):
 
     def spffn_active_grow(self, threshold):
         idx = torch.nonzero((self.w <= threshold).float()).view(-1)
-        print("self.w = ", self.w.size())
-        print("nonzero w index: ", idx)
+        # print("self.w = ", self.w.size())
+        # print("nonzero w index: ", idx)
 
         C_out, C_in, kh, kw = self.module.weight.shape
         c1 = C_out - self.eout
         c3 = C_in - self.ein
-        print("C_out = {}, C_in = {}, c1(orig out) = {}, c3(orig in) = {}" .format(C_out, C_in, c1, c3))
+        print("C_out = {}, C_in = {}, c1(orig out) = {}, c3(orig in) = {}".format(C_out, C_in, c1, c3))
 
         split_idx, new_idx = idx[idx < c1], idx[idx >= c1]
         n_split = split_idx.shape[0]
         n_new = new_idx.shape[0]
-        print("split idx: ", split_idx)
-        print("new idx: ", new_idx)
+        # print("split idx: ", split_idx)
+        # print("new idx: ", new_idx)
 
         c2 = c1 + n_split
-        print("c2(split out) = ", c2)
+        # print("c2(split out) = ", c2)
 
         device = self.get_device()
         delta = self.v[split_idx, ...]
 
         new_layer = nn.Conv2d(in_channels=C_in,
-                              out_channels=c1+n_split+n_new,
+                              out_channels=c1 + n_split + n_new,
                               kernel_size=(self.kh, self.kw),
                               stride=(self.dh, self.dw),
                               padding=(self.ph, self.pw),
@@ -574,42 +654,41 @@ class Conv2d(SpModule):
 
         # for current layer [--original--c1--split_new--c2--add new--]
         old_W = self.module.weight.data.clone()
-        print("old W.size = ", old_W.size())
+        # print("old W.size = ", old_W.size())
 
         try:
             old_W[:, C_in - self.ein:, :, :] = self.vni.clone()
         except:
             pass
         try:
-            old_W[C_out-self.eout:, :C_in-self.ein, :, :] = self.vno.clone()
+            old_W[C_out - self.eout:, :C_in - self.ein, :, :] = self.vno.clone()
         except:
             pass
 
-        new_layer.weight.data[:c1, ...] = old_W[:c1,...]
-        print("newlayer weight.size = ", new_layer.weight.data.size())
-
+        new_layer.weight.data[:c1, ...] = old_W[:c1, ...]
+        # print("newlayer weight.size = ", new_layer.weight.data.size())
 
         if n_split > 0:
             new_layer.weight.data[c1:c2, ...] = old_W[split_idx, ...]
-            new_layer.weight.data[split_idx,:c3,...] += delta
-            new_layer.weight.data[c1:c2:,:c3,...] -= delta
+            new_layer.weight.data[split_idx, :c3, ...] += delta
+            new_layer.weight.data[c1:c2:, :c3, ...] -= delta
 
         if n_new > 0:
             new_layer.weight.data[c2:, ...] = old_W[new_idx, ...]
 
         if self.has_bias:
             old_b = self.module.bias.data.clone()
-            new_layer.bias.data[:c1, ...] = old_b[:c1,...].clone()
+            new_layer.bias.data[:c1, ...] = old_b[:c1, ...].clone()
             if n_split > 0:
                 new_layer.bias.data[c1:c2, ...] = old_b[split_idx]
             if n_new > 0:
-                new_layer.bias.data[c2:,...] = 0.
+                new_layer.bias.data[c2:, ...] = 0.
 
         self.module = new_layer
 
         # for batchnorm layer
         if self.has_bn:
-            new_bn = nn.BatchNorm2d(c1+n_split+n_new).to(device)
+            new_bn = nn.BatchNorm2d(c1 + n_split + n_new).to(device)
             new_bn.weight.data[:c1] = self.bn.weight.data[:c1].clone()
             new_bn.bias.data[:c1] = self.bn.bias.data[:c1].clone()
             new_bn.running_mean.data[:c1] = self.bn.running_mean.data[:c1].clone()
@@ -628,7 +707,7 @@ class Conv2d(SpModule):
                 new_bn.running_var.data[c2:] = self.bn.running_var.data[new_idx]
             self.bn = new_bn
 
-        return n_split+n_new, split_idx, new_idx
+        return n_split + n_new, split_idx, new_idx
 
     def spffn_passive_grow(self, split_idx, new_idx):
         n_split = split_idx.shape[0] if split_idx is not None else 0
@@ -638,19 +717,19 @@ class Conv2d(SpModule):
         if self.groups != 1:
             C_in = C_out
         device = self.get_device()
-        c1 = C_in-self.ein
+        c1 = C_in - self.ein
         if n_split == 0 and n_new == self.ein:
             return
 
         if self.groups != 1:
             self.groups = c1 + n_split + n_new
             C_out = self.groups
-        new_layer = nn.Conv2d(in_channels=c1+n_split+n_new,
+        new_layer = nn.Conv2d(in_channels=c1 + n_split + n_new,
                               out_channels=C_out,
                               kernel_size=(self.kh, self.kw),
                               stride=(self.dh, self.dw),
                               padding=(self.ph, self.pw),
-                              bias=self.has_bias, groups = self.groups).to(device)
+                              bias=self.has_bias, groups=self.groups).to(device)
 
         c2 = c1 + n_split
 
@@ -658,16 +737,16 @@ class Conv2d(SpModule):
             new_layer.bias.data = self.module.bias.data.clone()
 
         if self.groups != 1:
-            new_layer.weight.data[:c1,:,...] = self.module.weight.data[:c1,:,...].clone()
+            new_layer.weight.data[:c1, :, ...] = self.module.weight.data[:c1, :, ...].clone()
         else:
-            new_layer.weight.data[:,:c1,...] = self.module.weight.data[:,:c1,...].clone()
+            new_layer.weight.data[:, :c1, ...] = self.module.weight.data[:, :c1, ...].clone()
 
         if n_split > 0:
             if self.groups == 1:
-                new_layer.weight.data[:,c1:c2,:,:] = self.module.weight.data[:,split_idx,:,:] / 2.
-                new_layer.weight.data[:,split_idx,...] /= 2.
+                new_layer.weight.data[:, c1:c2, :, :] = self.module.weight.data[:, split_idx, :, :] / 2.
+                new_layer.weight.data[:, split_idx, ...] /= 2.
             else:
-                new_layer.weight.data[c1:c2, :,...] = self.module.weight.data[split_idx, :,...]
+                new_layer.weight.data[c1:c2, :, ...] = self.module.weight.data[split_idx, :, ...]
         if self.groups != 1:
             new_bn = nn.BatchNorm2d(C_out).to(device)
             out = C_out - n_new - n_split
@@ -692,8 +771,8 @@ class Conv2d(SpModule):
             self.bn = new_bn
         if n_new > 0:
             if self.groups != 1:
-                new_layer.weight.data[c2:,:,...] = self.module.weight.data[new_idx, :,...]
+                new_layer.weight.data[c2:, :, ...] = self.module.weight.data[new_idx, :, ...]
             else:
-                new_layer.weight.data[:,c2:,...] = self.module.weight.data[:,new_idx,...]
+                new_layer.weight.data[:, c2:, ...] = self.module.weight.data[:, new_idx, ...]
 
         self.module = new_layer

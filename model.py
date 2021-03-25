@@ -15,7 +15,7 @@ import sys
 import sp
 import bi
 
-def sp_vgg(model, n_classes=10, dimh=16, method='none'):
+def sp_vgg(model, binary, n_classes=10, dimh=16, method='none'):
     cfgs = {
         'vgg11': [1, 'M', 2, 'M', 4, 4, 'M', 8, 8, 'M', 8, 8, 'M'],
         'vgg14': [1, 1, 'M', 2, 2, 'M', 4, 4, 'M', 8, 8, 'M', 8, 8, 'M'],
@@ -38,19 +38,20 @@ def sp_vgg(model, n_classes=10, dimh=16, method='none'):
                 net.append(sp.Conv2d(in_channels, 64 * x, kernel_size=3, padding=1, actv_fn='relu', has_bn=True))
                 in_channels = 64 * x
             else:
-                # binary network, first layer full-precision
-                if in_channels == 3:
-                    net.append(sp.Conv2d(in_channels, dimh, kernel_size=3, padding=1, actv_fn='none', has_bn=True))
+                if binary:
+                    # binary network, first layer full-precision
+                    if in_channels == 3:
+                        net.append(sp.Conv2d(in_channels, dimh, kernel_size=3, padding=1, actv_fn='none', has_bn=True))
+                    else:
+                        net.append(bi.biConv2d(in_channels, dimh, kernel_size=3, padding=1, actv_fn='none', has_bn=True))
                 else:
-                    net.append(bi.biConv2d(in_channels, dimh, kernel_size=3, padding=1, actv_fn='none', has_bn=True))
-                # full-precision network
-                # net.append(sp.Conv2d(in_channels, dimh, kernel_size=3, padding=1, actv_fn='relu', has_bn=True))
+                    # full-precision network
+                    net.append(sp.Conv2d(in_channels, dimh, kernel_size=3, padding=1, actv_fn='relu', has_bn=True))
                 in_channels = dimh
             if prev_idx >= 0:
                 next_layers[prev_idx] = [i]
             prev_idx = i
     net.append(sp.Conv2d(in_channels, n_classes, kernel_size=1, padding=0, actv_fn='none', can_split=False))
-    # net.append(bi.biConv2d(in_channels, n_classes, kernel_size=1, padding=0, actv_fn='none', can_split=False))
     next_layers[prev_idx] = [n]
     layer2split = list(next_layers.keys())
     return net, next_layers, layer2split
@@ -104,6 +105,7 @@ class Classifier(sp.SpNet):
         self.verbose = config.verbose
         self.device = config.device
         self.grow_ratio = config.grow_ratio
+        self.binary = config.binary
 
         C, H, W = config.dim_input
         assert (H == 32) and (W == 32)
@@ -118,10 +120,10 @@ class Classifier(sp.SpNet):
                 for j in group:
                     self.total_group[j] = i
         else:
-            self.net, self.next_layers, self.layers_to_split = sp_vgg(config.model, n_classes = config.dim_output,  dimh=dimh, method=self.config.method)
+            self.net, self.next_layers, self.layers_to_split = sp_vgg(config.model, config.binary, n_classes = config.dim_output,  dimh=dimh, method=self.config.method)
 
         if self.verbose:
-            print("[INFO] network:\n", self.net)
+            # print("[INFO] network:\n", self.net)
             print("[INFO] layers to split: ", self.layers_to_split)
 
         self.lr = 0.1
@@ -172,14 +174,16 @@ class Classifier(sp.SpNet):
         x = x.view(x.shape[0], -1)
         return x
 
-    def spffn_forward(self, x, alpha):
-        for layer in self.net:
+    # TODO: binary version of spffn_forward -> bconv.py spffn_forward
+    def spffn_forward(self, x, splitlog, alpha):
+        for i, layer in enumerate(self.net):
             #if isinstance(layer, sp.SpModule) and layer.can_split:
             if isinstance(layer, sp.SpModule):
-                x = layer.spffn_forward(x, alpha=alpha)
+                x = layer.spffn_forward(x, splitlog, alpha=alpha)
             else:
                 x = layer(x)
-        return x.view(x.shape[0], -1)
+        out = x.view(x.shape[0], -1)
+        return out
 
     def spff_forward(self, x, alpha):
         for layer in self.net:
@@ -218,9 +222,9 @@ class Classifier(sp.SpNet):
         loss = self.criterion(scores, y)
         return loss
 
-    def spffn_loss_fn(self, x, y, alpha=-1):
-        scores = self.spffn_forward(x, alpha=alpha)
-        loss = self.criterion(scores, y)
+    def spffn_loss_fn(self, inputs, targets, splitlog, alpha=-1):
+        scores = self.spffn_forward(inputs, splitlog, alpha=alpha)
+        loss = self.criterion(scores, targets)
         # print("alpha = {}, scores.size = {}, loss = {}" .format(alpha, scores.size(), loss))
         return loss
 
@@ -248,63 +252,95 @@ class Classifier(sp.SpNet):
         return loss.detach().cpu().item()
 
     ## -- firefly new split -- ##
+
     def spffn(self, dataset, n_batches):
         v_params = []
         for i, layer in enumerate(self.net):
             if isinstance(layer, sp.SpModule):
-                print("self.net[{}] = {}" .format(i, self.net[i]))
+                # print(">>> get into spffn(model.py)")
+                # print("self.net[{}] = {}" .format(i, self.net[i]))
                 enlarge_in = (i > 0)
                 enlarge_out = (i < len(self.net)-1)
-                print("enlarge_in = {}, enlarge_out = {}" .format(enlarge_in, enlarge_out))
+                # print("enlarge_in = {}, enlarge_out = {}" .format(enlarge_in, enlarge_out))
                 self.net[i].spffn_add_new(enlarge_in=enlarge_in, enlarge_out=enlarge_out)
                 self.net[i].spffn_reset()
-                print("reset, layer = {}" .format(self.net[i]))
+                # print("reset, layer = {}" .format(self.net[i]))
 
                 if layer.can_split:
                     v_params += [self.net[i].v]
-                    print("self.net[{}] can split" .format(i))
-                    print("v = {}" .format(self.net[i].v.size()))
+                    # print("self.net[{}] can split" .format(i))
+                    # print("v = {}" .format(self.net[i].v.size()))
                 if enlarge_in:
                     v_params += [self.net[i].vni]
-                    print("vni = {}" .format(self.net[i].vni.size()))
+                    # print("vni = {}" .format(self.net[i].vni.size()))
                 if enlarge_out:
                     v_params += [self.net[i].vno]
-                    print("vno = {}" .format(self.net[i].vno.size()))
-                print("- - - - - - - - - -")
+                    # print("vno = {}" .format(self.net[i].vno.size()))
+                # print("= = = = = = = = = =")
         opt_v = RMSprop(nn.ParameterList(v_params), lr=1e-3, momentum=0.1, alpha=0.9)
-        # print("v_params: ", v_params)
-        print("= = = = = = = = = =")
+        # print("v_params.size: ", len(v_params))
 
         # train the splitting direction
+        #########################################################
+        print("*"*80)
+        print("train the splitting direction")
+        print("*"*80)
+        splitlogpath = "checkpoint/split_direction.log"
+        # create file handler which logs even debug messages
+        import logging
+        splitlog = logging.getLogger()
+        splitlog.setLevel(logging.DEBUG)
+
+        ch = logging.StreamHandler()
+        fh = logging.FileHandler(splitlogpath)
+
+        formatter = logging.Formatter('%(asctime)s - %(message)s')
+        ch.setFormatter(formatter)
+        fh.setFormatter(formatter)
+
+        splitlog.addHandler(fh)
+        splitlog.addHandler(ch)
+        #########################################################
+        # from tensorboardX import SummaryWriter
+        # writer = SummaryWriter('optim_log')
+        #########################################################
+
         loader = torch.utils.data.DataLoader(dataset, batch_size=128, shuffle=True, num_workers=2)
         n_batches = len(loader)
 
-        for i, (x, y) in enumerate(loader):
-            x, y = x.to(self.device), y.to(self.device)
-            loss = self.spffn_loss_fn(x, y)
+        # TODO: growing, grad optimization step 1
+        # I think this part notes the step 1 in the grad optimization?
+        # The loss function is to update the params (in step 1)
+        # But there are constraints
+        # The constraints are layer-wise, so in each update iteration,
+        # for each layer, the penalty is calculated and back-propped.
+        for i, (inputs, targets) in enumerate(loader):
+            if (i>10):
+                break
+            inputs, targets = inputs.to(self.device), targets.to(self.device)
+            # calculate eq.4 in paper
+            loss = self.spffn_loss_fn(inputs, targets, splitlog)
             opt_v.zero_grad()
             loss.backward()
             for j, layer in enumerate(self.net):
                 if isinstance(layer, sp.SpModule):
-                    # print("layer [{}] = {}" .format(i, layer))
+                    # transform the hard constraints to a penalty term
                     layer.spffn_penalty()
-                    # print("- - - -")
             opt_v.step()
 
+        # TODO: optimization step 2
         self.config.granularity = 1
-        alphas = np.linspace(0, 1, self.config.granularity * 2+1)
+        alphas = np.linspace(0, 1, self.config.granularity * 2 + 1)
         for alpha in alphas[1::2]:
-            print("alpha = {}" .format(alpha))
             for x, y in loader:
                 x, y = x.to(self.device), y.to(self.device)
-                loss = self.spffn_loss_fn(x, y, alpha=1.0)
+                loss = self.spffn_loss_fn(x, y, splitlog, alpha=1.0)
                 opt_v.zero_grad()
                 loss.backward()
                 for i in self.layers_to_split:
-                    # print("update w in layer {}..." .format(i))
                     self.net[i].spffn_update_w(self.config.granularity * n_batches, output = False)
 
-        print("= = = = = = = = = =")
+        # print("= = = = = = = = = =")
 
     ## -- firefly split -- ##
     def spff(self, dataset, n_batches):
@@ -319,23 +355,26 @@ class Classifier(sp.SpNet):
         # train the splitting direction
         loader = torch.utils.data.DataLoader(dataset, batch_size=128, shuffle=True, num_workers=2)
         n_batches = len(loader)
+        # print("-->  train the splitting direction")
+        # print("n_batches = {}" .format(n_batches))
 
-        for x, y in loader:
-            x, y = x.to(self.device), y.to(self.device)
+        for i, (inputs, targets) in enumerate(loader):
+            inputs, targets = inputs.to(self.device), targets.to(self.device)
             loss = self.spff_loss_fn(x, y)
             opt_v.zero_grad()
             loss.backward()
-            for i in self.layers_to_split:
-                loss += self.net[i].v.norm(1) * 1e-2
+            for j in self.layers_to_split:
+                loss += self.net[j].v.norm(1) * 1e-2
             opt_v.step()
 
-        for x, y in loader:
-            x, y = x.to(self.device), y.to(self.device)
-            loss = self.spff_loss_fn(x, y, alpha=1e-3)
+        for i, (inputs, targets) in enumerate(loader):
+            inputs, targets = inputs.to(self.device), targets.to(self.device)
+            loss = self.spff_loss_fn(inputs, targets, alpha=1e-3)
             opt_v.zero_grad()
             loss.backward()
-            for i in self.layers_to_split:
-                self.net[i].spff_update_w(n_batches)
+            for j in self.layers_to_split:
+                # update the gradient
+                self.net[j].spff_update_w(n_batches)
 
         for i in self.layers_to_split:
             self.net[i].spff_scale_v()

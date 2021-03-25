@@ -43,12 +43,17 @@ class SpNet(nn.Module):
                 layer.clear()
 
     def get_num_elites(self):
+        print("= = = = = = = = = =")
+        print(">>> get number of elites:")
         n = 0
         for i in self.layers_to_split:
             n += self.net[i].module.weight.shape[0]
+        print("n = ", n)
 
-        # the number of neurons to grow in each splitting
+        # the number of 'neurons' to grow in each splitting
         self.n_elites = int(n * self.grow_ratio)
+        print("n_elites = ", self.n_elites)
+        print("= = = = = = = = = =")
 
     def get_num_elites_group(self, group_num):
         for g in range(group_num):
@@ -62,9 +67,26 @@ class SpNet(nn.Module):
                 self.n_elites_group[g] = int(n * self.grow_ratio)
 
     def sp_threshold(self):
-        ws, wi = torch.sort(torch.cat([self.net[i].w for i in self.layers_to_split]).reshape(-1))
-        total= ws.shape[0]
-        threshold = ws[self.n_elites]
+        # ws, wi = torch.sort(torch.cat([self.net[i].w for i in self.layers_to_split]).reshape(-1))
+        print(">>> Calculate the sp_threshold")
+        wlist = torch.cat([self.net[i].w for i in self.layers_to_split]).reshape(-1)
+        print("wlist.size = {}".format(wlist.size()))
+        print("--  wlist  --")
+        print(wlist)
+        sortedw, sortedidx = torch.sort(wlist)
+
+
+        total= sortedw.shape[0]
+        print("sortedw.size = {}, wi.size = {}" .format(sortedw.size(), sortedidx.size()))
+        print("--  sortedw  --")
+        print(sortedw)
+        print("--  sortedidx  --")
+        print(sortedidx)
+        print("n_elites = {}" .format(self.n_elites))
+        threshold = sortedw[self.n_elites]
+        print("threshold = ", threshold)
+        print("= = = = = = = = = =")
+
         return threshold
 
     def sp_threshold_group(self, group_num):
@@ -106,6 +128,7 @@ class SpNet(nn.Module):
         self.net.eval()
 
         if self.num_group == 1:
+            # print("group number == 1")
             self.get_num_elites()
         else:
             self.get_num_elites_group(self.num_group)
@@ -153,8 +176,8 @@ class SpNet(nn.Module):
                     if self.num_group != 1:
                         group = self.total_group[i]
                         threshold = self.sp_threshold_group(group)
-                    print("layer {}, num_group = {}, threshold = {}" .format(i, self.num_group, threshold))
-                    print(self.net[i])
+                    # print("layer {}, num_group = {}, threshold = {}" .format(i, self.num_group, threshold))
+                    # print(self.net[i])
                     n_new, split_idx, new_idx = self.net[i].spffn_active_grow(threshold)
                     sp_new = split_idx.shape[0] if split_idx is not None else 0
                     n_neurons_added[i] = (sp_new, n_new-sp_new)
@@ -163,9 +186,9 @@ class SpNet(nn.Module):
                     else:
                         isfirst = False
                     for j in self.next_layers[i]:
-                        print('spffn grow layer {}, split {} neurons,', self.net[j].module.weight.shape)
+                        # print('spffn grow layer {}, split {} neurons,' .format(j, self.net[j].module.weight.shape))
                         self.net[j].spffn_passive_grow(split_idx, new_idx)
-                print("- - - - - - - - - -")
+                # print("- - - - - - - - - -")
 
         else:
             threshold= self.sp_threshold()

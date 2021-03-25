@@ -28,16 +28,16 @@ class SpModule(nn.Module):
         self.has_bn = has_bn
         self.has_bias = has_bias
         self.epsilon = 1e-2
-        self.K = 70
+        self.K = 70             # max number of neuron to grow
 
         # modules
         self.module = None
         self.bn = None
 
         # auxiliaries
-        self.w = None
-        self.v = None
-        self.y = None
+        self.w = None           # the importance of the neurons, the integrated gradient s_i
+        self.v = None           # epsilon * delta
+        self.y = None           # the gradients of v
         self.S = []
 
         self.leaky_alpha = 0.2

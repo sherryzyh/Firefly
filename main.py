@@ -17,6 +17,7 @@ import sp
 from torch.autograd import Variable
 import math
 
+
 def adjust_learning_rate(optimizer, epoch, total_epochs, lr):
     lr_type = 'cos'
     if lr_type == 'cos':  # cos without warm-up
@@ -24,7 +25,7 @@ def adjust_learning_rate(optimizer, epoch, total_epochs, lr):
     elif lr_type == 'exp':
         step = 1
         decay = 0.96
-        lr = args.lr * (decay ** (epoch // step))
+        lr = config.lr * (decay ** (epoch // step))
     elif lr_type == 'fixed':
         lr = lr
     else:
@@ -33,24 +34,29 @@ def adjust_learning_rate(optimizer, epoch, total_epochs, lr):
         param_group['lr'] = lr
     return lr
 
+
 def check_path(path):
     if not os.path.exists(path):
         print("[INFO] making folder %s" % path)
         os.makedirs(path)
+
 
 def test(testloader, model):
     model.eval()
     correct = 0
     total = 1e-40
     for x, y in testloader:
-        x = x.to(config.device); y
+        x = x.to(config.device);
+        y
         y_ = model.classify(x).detach().cpu()
         correct += (y == y_).float().sum().item()
         total += x.shape[0]
     model.train()
     return correct / total
 
+
 def run(trainset, trainloader, testloader, config):
+    print("[INFO] into run function")
     check_path('./img')
 
     torch.manual_seed(config.seed)
@@ -58,14 +64,13 @@ def run(trainset, trainloader, testloader, config):
     np.random.seed(config.seed)
 
     exp_name = "exp_%s_%s_initdim%d_seed%d_grow%.3f_gra%d_alpha3_new" % (
-            config.dataset,
-            config.method,
-            config.dim_hidden,
-            config.seed,
-            config.grow_ratio,
-            config.granularity)
+        config.dataset,
+        config.method,
+        config.dim_hidden,
+        config.seed,
+        config.grow_ratio,
+        config.granularity)
     log = config.log
-
 
     config.resume = False
     if config.resume:
@@ -76,16 +81,18 @@ def run(trainset, trainloader, testloader, config):
         # ckpt = torch.load("stats/round_%d_%s.pt" % (load_round, exp_name))
         # model.load_state_dict(ckpt)
         pass
-    else:
+    elif config.onlys:
+        stats = np.load("%s.npy" % config.ckpt, allow_pickle=True)
+        stats = stats.tolist()
+        print(stats)
         model = Classifier(config).to(config.device)
-        if config.verbose:
-            params = model.get_num_params()
-            cfg = model.get_cfg()
-            log.info('[INFO] Initial model #params: %10d' %(params))
-            log.info('[INFO] Initial model configuration: [{}]' .format(', '.join(map(str, cfg))))
-            log.info("[INFO] Split method: {}" .format(str(config.method)))
-            log.info("="*80)
-
+        ckpt = torch.load('%s.pt' % config.ckpt)
+        model.load_state_dict(ckpt)
+        print("[INFO] model done")
+    else:
+        print("[INFO] load/new model on device %s" % str(config.device))
+        model = Classifier(config).to(config.device)
+        print("[INFO] model done")
         stats = {
             'train_loss': [],
             'test_accuracy': [],
@@ -100,51 +107,58 @@ def run(trainset, trainloader, testloader, config):
                     stats['widths'][i] = [0, 0]
                 else:
                     stats['widths'][i] = 0
-
+    if config.verbose:
+        params = model.get_num_params()
+        cfg = model.get_cfg()
+        log.info('[INFO] Initial model #params: %10d' % (params))
+        log.info('[INFO] Initial model configuration: [{}]'.format(', '.join(map(str, cfg))))
+        log.info("[INFO] Split method: {}".format(str(config.method)))
+        log.info("=" * 80)
     n_batches = len(trainloader)
-    
+
     load_round = config.load_round
     for round in range(load_round, config.n_rounds):
         start_time = time.time()
         traindone = False
-        for epoch in range(1, config.n_epochs + 1):
-            if round <= load_round and config.resume:
-                break
-            loss = 0.
-            for i, (inputs, targets) in enumerate(trainloader):
-                # if config.debug and i > 50:
-                #     traindone = True
-                #     break
-                inputs = inputs.to(config.device)
-                targets = targets.to(config.device)
-                loss += model.update(inputs, targets)
-            loss /= n_batches
-            test_acc = test(testloader, model)
-            stats['train_loss'].append(loss)
-            stats['test_accuracy'].append(test_acc)
+        if not config.onlys:
+            for epoch in range(1, config.n_epochs + 1):
+                if round <= load_round and config.resume:
+                    break
+                loss = 0.
+                for i, (inputs, targets) in enumerate(trainloader):
+                    # if config.debug and i > 50:
+                    #     traindone = True
+                    #     break
+                    inputs = inputs.to(config.device)
+                    targets = targets.to(config.device)
+                    loss += model.update(inputs, targets)
+                loss /= n_batches
+                test_acc = test(testloader, model)
+                stats['train_loss'].append(loss)
+                stats['test_accuracy'].append(test_acc)
 
-            if epoch == config.n_epochs:
-                traindone = True
+                if epoch == config.n_epochs:
+                    traindone = True
 
-            # adjust learning rate
-            if epoch == config.n_epochs // 2 - 1:
-                model.decay_lr(0.1)
-            if epoch == config.n_epochs // 4 * 3 - 1:
-                model.decay_lr(0.1)
+                # adjust learning rate
+                if epoch == config.n_epochs // 2 - 1:
+                    model.decay_lr(0.1)
+                if epoch == config.n_epochs // 4 * 3 - 1:
+                    model.decay_lr(0.1)
 
-            if epoch % 20 == 0 or traindone:
-                print("[INFO] Round %d Epoch %03d | Training loss is %10.4f | Test accuracy is %10.4f" % (
-                round, epoch, loss, test_acc))
-                np.save("checkpoint/%s/%s.npy" % (config.save, exp_name), stats)
-                torch.save(model.state_dict(), "checkpoint/%s/%s.pt" % (config.save, exp_name))
+                if epoch % 20 == 0 or traindone:
+                    print("[INFO] Round %d Epoch %03d | Training loss is %10.4f | Test accuracy is %10.4f" % (
+                        round, epoch, loss, test_acc))
+                    np.save("checkpoint/%s/%s.npy" % (config.save, exp_name), stats)
+                    torch.save(model.state_dict(), "checkpoint/%s/%s.pt" % (config.save, exp_name))
 
-            if traindone:
-                log.info("[INFO] Round %d:" % round)
-                log.info("[INFO] Training takes %10.4f sec | Training loss: %10.4f | Test accuracy: %10.4f" % ((time.time() - start_time), loss, test_acc))
+                if traindone:
+                    log.info("[INFO] Round %d:" % round)
+                    log.info("[INFO] Training takes %10.4f sec | Training loss: %10.4f | Test accuracy: %10.4f" % (
+                    (time.time() - start_time), loss, test_acc))
 
-        np.save("checkpoint/%s/round_%d_%s.npy" % (config.save, round, exp_name), stats)
-        torch.save(model.state_dict(), "checkpoint/%s/round_%d_%s.pt" % (config.save, round, exp_name))
-        
+            np.save("checkpoint/%s/round_%d_%s.npy" % (config.save, round, exp_name), stats)
+            torch.save(model.state_dict(), "checkpoint/%s/round_%d_%s.pt" % (config.save, round, exp_name))
 
         if config.method != 'none':
             # Grow the network use NASH
@@ -160,7 +174,8 @@ def run(trainset, trainloader, testloader, config):
                     for e in range(17):
                         print(e)
                         for i, (x, y) in enumerate(trainloader):
-                            inputs = x.to(config.device); targets = y.to(config.device)
+                            inputs = x.to(config.device);
+                            targets = y.to(config.device)
                             loss += newmodel.update(inputs, targets)
                         adjust_learning_rate(newmodel.opt, e, 17, 0.05)
                         test_acc = test(testloader, newmodel)
@@ -171,20 +186,62 @@ def run(trainset, trainloader, testloader, config):
                 del bestmodel
                 print('Search Time', time.time() - rtime)
             else:
-                n_neurons, splittime = model.split(config.method, trainset)
+                # if config.binary:
+                #     #
+                #     print("[INFO] copy a full-precision model")
+                #     bimodel = model
+                #     config.binary = False
+                #     model = Classifier(config).to(config.device)
+                #     config.binary = True
+                #
+                #     ckpt = torch.load("checkpoint/binary_test/round_0_exp_cifar10_fireflyn_initdim16_seed0_grow0.350_gra3_alpha3_new.pt")
+                #     model.load_state_dict(ckpt)
+                #     print("-" * 80)
+                #     # print(model.state_dict().keys())
+                #     # print(bimodel.state_dict().keys())
+                #     for key in model.state_dict().keys():
+                #         print("binary param:")
+                #         print(bimodel.state_dict()[key])
+                #         print("-"*40)
+                #         print("fp param:")
+                #         print(model.state_dict()[key])
+                #         print("-" * 80)
+                #
+                #
+                #     test_acc = test(testloader, model)
+                #     print("[INFO] The fp counterpart acc = %10.4f" % test_acc)
+                #     test_acc = test(testloader, bimodel)
+                #     print("[INFO] The bi counterpart acc = %10.4f" % test_acc)
+                if config.binary:
+                    test_acc = 0.5308
+                    print("[INFO] The binary model acc = %10.4f" % test_acc)
+                else:
+                    test_acc = test(testloader, model)
+                    print("[INFO] The loaded model acc = %10.4f" % test_acc)
 
-            test_acc = test(testloader, model)
-            log.info("[INFO] Splitting takes %10.4f sec | Test accuracy after splitting: %10.4f" % (splittime, test_acc))
+                n_neurons, splittime = model.split(config.method, trainset)
+                # pass
+
+            # for n, p in model.named_parameters():
+            #     print(n)
+            #     print(p)
+
             params = model.get_num_params()
             cfg = model.get_cfg()
-            log.info('[INFO] Current #params: %10d' %(params))
-            log.info('[INFO] Current configuration: [{}]' .format(', '.join(map(str, cfg))))
+            log.info('[INFO] Current #params: %10d' % (params))
+            log.info('[INFO] Current configuration: [{}]'.format(', '.join(map(str, cfg))))
+
+            test_acc = test(testloader, model)
+            log.info(
+                "[INFO] Splitting takes %10.4f sec | Test accuracy after splitting: %10.4f" % (splittime, test_acc))
             model.set_lr(0.1)
             lr = 0.1
             model.create_optimizer()
 
+
 if __name__ == "__main__":
     config = Config()
+
     if not os.path.exists('stats'):
         os.makedirs('stats')
     if not os.path.exists('checkpoint/%s/' % config.save):
@@ -197,26 +254,32 @@ if __name__ == "__main__":
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), [0.2470, 0.2435, 0.2616]),
-        ])
+    ])
 
     transform_test = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), [0.2470, 0.2435, 0.2616]),
     ])
     if config.dataset == "mnist":
-        trainset = torchvision.datasets.MNIST(root='../../ButterFly/data', train=True, download=True, transform=transform_train)
+        trainset = torchvision.datasets.MNIST(root='../../ButterFly/data', train=True, download=True,
+                                              transform=transform_train)
         trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=4)
-        testset = torchvision.datasets.MNIST(root='../../ButterFly/data', train=False, download=True, transform=transform_test)
+        testset = torchvision.datasets.MNIST(root='../../ButterFly/data', train=False, download=True,
+                                             transform=transform_test)
         testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=4)
     elif config.dataset == 'cifar10':
+        print("[INFP] start load dataset %s" % str(config.dataset))
         trainset = torchvision.datasets.CIFAR10(root='../data', train=True, download=False, transform=transform_train)
         trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=4)
         testset = torchvision.datasets.CIFAR10(root='../data', train=False, download=False, transform=transform_test)
         testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=4)
+        print("[INFO] dataset load done")
     elif config.dataset == 'cifar100':
-        trainset = torchvision.datasets.CIFAR100(root='../../ButterFly/data', train=True, download=True, transform=transform_train)
+        trainset = torchvision.datasets.CIFAR100(root='../../ButterFly/data', train=True, download=True,
+                                                 transform=transform_train)
         trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=4)
-        testset = torchvision.datasets.CIFAR100(root='../../ButterFly/data', train=False, download=True, transform=transform_test)
+        testset = torchvision.datasets.CIFAR100(root='../../ButterFly/data', train=False, download=True,
+                                                transform=transform_test)
         testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=4)
 
     run(trainset, trainloader, testloader, config)

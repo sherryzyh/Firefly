@@ -1,6 +1,7 @@
 import argparse
 import numpy as np
 
+
 class Config:
     def __init__(self):
         self.parser = argparse.ArgumentParser()
@@ -24,6 +25,7 @@ class Config:
         self.parser.add_argument('--batch_size', default=128, type=int, help='batch size')
         self.parser.add_argument('--granularity', default=3, type=int, help='granularity')
         self.parser.add_argument('--seed', default=0, type=int, help='seed')
+        self.parser.add_argument('--load_round', default=0, type=int, help='round to load')
         self.parser.add_argument('--dim_hidden', default=16, type=int, help='initial hidden dimension')
         self.parser.add_argument('--grow_every', default=10, type=int, help='grow per # epoch')
         self.parser.add_argument('--warmup', default=50, type=int, help='warmup # epoch')
@@ -35,16 +37,18 @@ class Config:
         self.parser.add_argument('--momentum', default=0.9, type=float, help='sgd momentum')
         self.parser.add_argument('--n_rounds', default=10, type=int, help='number of growing round')
         # self.parser.add_argument('--n_elites', default=5, type=int, help='number of added neurons per split')
-        self.parser.add_argument('--n_epochs', default=160, type=int, help='number of training epochs in each round before split')
+        self.parser.add_argument('--n_epochs', default=160, type=int,
+                                 help='number of training epochs in each round before split')
         self.parser.add_argument('--grow_ratio', default=0.35, type=float, help='number of added neurons per split')
         self.parser.add_argument('--alpha', default=0.3, type=float, help='alpha')
-        self.parser.add_argument('--load_round', default=0, type=int, help='round to load')
         self.parser.add_argument('--gpu', default='0', type=str, help="cuda devices")
         self.parser.add_argument('--save', default='default', type=str, help="save folder path")
 
-
         self.parser.add_argument('--debug', default=False, dest='debug', action='store_true')
-        self.parser.add_argument('--bi', default=False, dest='bi', action='store_true')
+        self.parser.add_argument('--binary', default=False, dest='binary', action='store_true')
+        self.parser.add_argument('--onlys', default=False, dest='onlys', action='store_true',
+                                 help='only perform splitting on pretrained model')
+        self.parser.add_argument('--ckpt', default='./', type=str, help="pretrained model path")
 
         args = self.parser.parse_args()
 
@@ -72,11 +76,10 @@ class Config:
         self.resume = False if args.load_round == 0 else True
         self.device = f"cuda:{args.gpu}"
         self.save = args.save
+        self.binary = args.binary
+        self.onlys = args.onlys
+        self.ckpt = args.ckpt
 
-        # self.summary = args.summary
-        # self.load = args.load
-        # self.expname = args.expname
-        
         if self.dataset == 'mnist':
             self.dim_input = 784
             self.dim_output = 10
@@ -87,7 +90,6 @@ class Config:
             self.dim_input = (3, 32, 32)
             self.dim_output = 100
 
-
         self.debug = args.debug
         if self.debug:
             self.save = 'debug'
@@ -95,7 +97,7 @@ class Config:
             self.n_rounds = 1
 
         #########################################################
-        self.logpath = "checkpoint/summary_%s.log" %self.save
+        self.logpath = "checkpoint/summary_%s.log" % self.save
         # create file handler which logs even debug messages
         import logging
         log = logging.getLogger()
@@ -116,7 +118,7 @@ class Config:
 
         self.verbose = True
         if self.verbose:
-            log.info("="*80)
+            log.info("=" * 80)
             log.info("[INFO] -- Experiment Configs --")
             log.info("       1. data & split method")
             log.info("          dataset: %s" % self.dataset)
@@ -132,8 +134,11 @@ class Config:
             log.info("          dim_hidden: %d" % self.dim_hidden)
             log.info("          dim_output: %d" % self.dim_output)
             log.info("          model: %s" % self.model)
+            log.info("          binary: %s" % str(self.binary))
             log.info("       4. device")
             log.info("          %s" % str(self.device))
             if self.debug:
                 log.info("[INFO] -- In Debug Mode --")
-            log.info("="*80)
+            if self.onlys:
+                log.info("[INFO] -- Only Splitting on Pretrained Model --")
+            log.info("=" * 80)

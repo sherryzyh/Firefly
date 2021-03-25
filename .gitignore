@@ -4,6 +4,8 @@ sp/__pycache__/
 
 checkpoint/
 bi/
+optim_log/
+
 
 *.out
 *.bash
