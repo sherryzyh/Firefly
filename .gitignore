@@ -10,3 +10,4 @@ optim_log/
 *.out
 *.bash
 *.md
+demo.py

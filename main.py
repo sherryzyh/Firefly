@@ -114,7 +114,12 @@ def run(trainset, trainloader, testloader, config):
         log.info('[INFO] Initial model configuration: [{}]'.format(', '.join(map(str, cfg))))
         log.info("[INFO] Split method: {}".format(str(config.method)))
         log.info("=" * 80)
-    n_batches = len(trainloader)
+        n_batches = len(trainloader)
+        test_acc = test(testloader, model)
+        log.info("[INFO] The loaded model acc = %10.4f" % test_acc)
+        log.info("[INFO] model:")
+        log.info(model)
+        log.info("="*80)
 
     load_round = config.load_round
     for round in range(load_round, config.n_rounds):
@@ -160,6 +165,7 @@ def run(trainset, trainloader, testloader, config):
             np.save("checkpoint/%s/round_%d_%s.npy" % (config.save, round, exp_name), stats)
             torch.save(model.state_dict(), "checkpoint/%s/round_%d_%s.pt" % (config.save, round, exp_name))
 
+
         if config.method != 'none':
             # Grow the network use NASH
             if config.method == 'random':
@@ -186,45 +192,8 @@ def run(trainset, trainloader, testloader, config):
                 del bestmodel
                 print('Search Time', time.time() - rtime)
             else:
-                # if config.binary:
-                #     #
-                #     print("[INFO] copy a full-precision model")
-                #     bimodel = model
-                #     config.binary = False
-                #     model = Classifier(config).to(config.device)
-                #     config.binary = True
-                #
-                #     ckpt = torch.load("checkpoint/binary_test/round_0_exp_cifar10_fireflyn_initdim16_seed0_grow0.350_gra3_alpha3_new.pt")
-                #     model.load_state_dict(ckpt)
-                #     print("-" * 80)
-                #     # print(model.state_dict().keys())
-                #     # print(bimodel.state_dict().keys())
-                #     for key in model.state_dict().keys():
-                #         print("binary param:")
-                #         print(bimodel.state_dict()[key])
-                #         print("-"*40)
-                #         print("fp param:")
-                #         print(model.state_dict()[key])
-                #         print("-" * 80)
-                #
-                #
-                #     test_acc = test(testloader, model)
-                #     print("[INFO] The fp counterpart acc = %10.4f" % test_acc)
-                #     test_acc = test(testloader, bimodel)
-                #     print("[INFO] The bi counterpart acc = %10.4f" % test_acc)
-                if config.binary:
-                    test_acc = 0.5308
-                    print("[INFO] The binary model acc = %10.4f" % test_acc)
-                else:
-                    test_acc = test(testloader, model)
-                    print("[INFO] The loaded model acc = %10.4f" % test_acc)
-
                 n_neurons, splittime = model.split(config.method, trainset)
-                # pass
 
-            # for n, p in model.named_parameters():
-            #     print(n)
-            #     print(p)
 
             params = model.get_num_params()
             cfg = model.get_cfg()
@@ -234,6 +203,8 @@ def run(trainset, trainloader, testloader, config):
             test_acc = test(testloader, model)
             log.info(
                 "[INFO] Splitting takes %10.4f sec | Test accuracy after splitting: %10.4f" % (splittime, test_acc))
+            # log.info(
+            #     "[INFO] Test accuracy after splitting: %10.4f" % (test_acc))
             model.set_lr(0.1)
             lr = 0.1
             model.create_optimizer()
@@ -241,7 +212,8 @@ def run(trainset, trainloader, testloader, config):
 
 if __name__ == "__main__":
     config = Config()
-
+    log = config.log
+    log.info("????")
     if not os.path.exists('stats'):
         os.makedirs('stats')
     if not os.path.exists('checkpoint/%s/' % config.save):
@@ -249,6 +221,7 @@ if __name__ == "__main__":
     mean = np.array([0.4914, 0.4822, 0.4465])
     std = np.array([0.2470, 0.2435, 0.2616])
 
+    print("000")
     transform_train = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),

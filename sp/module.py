@@ -19,6 +19,7 @@ class SpModule(nn.Module):
                  actv_fn='relu',
                  has_bn=False,
                  has_bias=True,
+                 is_binary=False,
                  rescale=1.0):
         super(SpModule, self).__init__()
 
@@ -27,6 +28,7 @@ class SpModule(nn.Module):
         self.actv_fn = actv_fn
         self.has_bn = has_bn
         self.has_bias = has_bias
+        self.binary = is_binary
         self.epsilon = 1e-2
         self.K = 70             # max number of neuron to grow
 
@@ -112,9 +114,12 @@ class SpModule(nn.Module):
             raise NotImplementedError
 
     def forward(self, x):
-        x = self.module(x)
+        # if not self.binary:
+        x = self.module(x) # for full-precision
         if self.has_bn:
             x = self.bn(x)
+        # if self.binary:
+        #     x = self.module(x) # for binary
         return self._activate(x)
 
     def active_split(self, threshold):

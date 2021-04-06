@@ -182,12 +182,15 @@ class Conv2d(SpModule):
 
     def spffn_penalty(self):
         penalty = 0.
+        # print(">> self.v.grad = ", self.v.grad)
         if self.can_split:
             penalty += self.v.pow(2).sum()
         if self.eout > 0:
             penalty += 1e-2 * self.vno.pow(2).sum()
+        # print("penalty = {}" .format(penalty))
         if penalty > 0:
             (penalty * 1e-2).backward()
+        # print(">> penalty back, self.v.grad = ", self.v.grad)
 
     def spffn_clip(self):
         if self.ein > 0:  # since output is just 1
@@ -226,9 +229,16 @@ class Conv2d(SpModule):
 
     def spffn_update_w(self, d, output=False):
         if not output:
+            # print("self.y.grad.data = ", self.y.grad.data)
+            # print("self.w = ", self.w)
+            print("   > updating w")
             self.w += (self.y.grad.data / d).view(-1)
             self.y.grad = None
+            print("self.w = ", self.w)
+            # print("self.y = ", self.y)
+            # print("self.y.grad = ", self.y.grad)
         else:
+            # print(">>>>>>>> get into spffn_update_w, output=True")
             y_grad = grad(self.output.mean(), self.y)
             self.w += (self.y.grad.data / y_grad[0].data / d).view(-1)
             self.y.grad = None
@@ -236,50 +246,33 @@ class Conv2d(SpModule):
     def spffn_forward(self, x, splitlog, alpha=-1):
         # x.size = [B, C_in, H, W]
         out = self.module(x)  # [B, C_out(out+eout), H, W]
-        print("=" * 80)
-        print("=" * 80)
-        print(">> conv.spffn_forward:")
-        print("[INFO] input.size = ", x.size())
-        print("[INFO] out.size = ", out.size())
+        # print("=" * 80)
+        # print(">> conv.spffn_forward:")
+        # print("[INFO] input.size = ", x.size())
+        # print("[INFO] out.size = ", out.size())
 
         patches = self.get_conv_patches(x)
-        print("       patches.size = ", patches.size())
         B, H, W, C_in, kh, kw = patches.size()
         C_out = out.shape[1]
         cin, cout = C_in - self.ein, C_out - self.eout
-        print("       self.ein = {}, cin.size = {}; self.eout = {}, cout.size = {}".format(self.ein, cin, self.eout,
-                                                                                           cout))
 
         x = patches.view(B * H * W, -1, kh * kw)  # [B*H*W, C_in(cin + self.ein), kh*kw]
 
-        # original codes
         if self.ein > 0:
             # if expand input
-            x1, x2 = x[:, :cin, :].view(B * H * W, -1), x[:, cin:, :].view(B * H * W, -1)
-            # x1[B*H*W, cin*kh*kw], x2[B*H*W, self.ein*kh*kw]
+            x1, x2 = x[:, :cin, :].view(B * H * W, -1), x[:, cin:, :].view(B * H * W, -1) # x1[B*H*W, cin*kh*kw], x2[B*H*W, self.ein*kh*kw]
         else:
             x1 = x.view(B * H * W, -1)  # [B*H*W, C_in*kh*kw]
 
-        # noise_v:      the change in original parameters(theta matrix)
-        # noise_vno:    the change in params(cin, self.eout)
-        # noise_vi1:    the change in params(self.ein, cout)
-        # noise_vi2:    the change in params(self.ein, self.eout)
         if self.can_split:
             # the noise_v is directly by matrix multiplication when alpha < 0,
             #     it happens in the optimization step one, where epsilon and delta are altogether optimized
             #     v matrix represents epsilon * delta
             noise_v = x1.mm(self.v.view(-1, cin * kh * kw).t()).view(B, H, W, -1).permute(0, 3, 1, 2)  # [B,cout,H,W]
-            # print("noise_v:")
-            # print(noise_v)
             if alpha >= 0.:
-                # print("alpha = {}" .format(alpha))
-                # print("self.y:")
-                print(self.y[:, :cout, :, :])
                 noise_v = (noise_v.detach() * self.y[:, :cout, :, :] + noise_v * alpha)
-                # print("noise_v:")
-                # print(noise_v)
-            else:
-                print("alpha < 0")
+            # else:
+            #     print("alpha < 0")
 
         if self.eout > 0:
             noise_vo = x1.mm(self.vno.view(-1, cin * kh * kw).t()).view(B, H, W, -1).permute(0, 3, 1, 2)
@@ -294,37 +287,17 @@ class Conv2d(SpModule):
                 noise_vi1, noise_vi2 = noise_vi1[:, :cout], noise_vi1[:, cout:]  # [B*H*W, cout/eout]
                 noise_vi1 = noise_vi1.view(B, H, W, -1).permute(0, 3, 1, 2)
                 noise_vi2 = noise_vi2.view(B, H, W, -1).permute(0, 3, 1, 2)
-                # print("noise_vi1:")
-                print(noise_vi1)
-                # print("noise_vi2:")
-                print(noise_vi2)
             else:
                 noise_vi1 = noise_vi1.view(B, H, W, -1).permute(0, 3, 1, 2)
-                # print("noise_vi1:")
-                print(noise_vi1)
-                # print("no noise_vi2")
 
         o1_plus = o1_minus = o2 = 0.
         # o1_plus, o1_minus: the output(before activ) of two new neurons when splitting
         if self.can_split:
-            print("[INFO] noise_v.size = ", noise_v.size())
-            # print("-"*80)
-            # print("original out:")
-            # print(out[:,:cout,:,:])
-            # print("-"*80)
-            # print("noise_v:")
-            # print(noise_v)
-            # print("-"*80)
             o1_plus = out[:, :cout, :, :] + noise_v  # [B, cout, H, W]
             o1_minus = out[:, :cout, :, :] - noise_v  # [B, cout, H, W]
-            print("[INFO] o1_plus.size = ", o1_plus.size())
-            print("[INFO] o1_minus.size = ", o1_minus.size())
+            # print("[INFO] o1_plus.size = ", o1_plus.size())
+            # print("[INFO] o1_minus.size = ", o1_minus.size())
 
-            # print("-"*80)
-            # print("o1_plus:")
-            # print(o1_plus)
-            # print("o1_minus:")
-            # print(o1_minus)
             if self.eout > 0:
                 o2 = out[:, cout:, :, :] + noise_vo
             if self.ein > 0:
@@ -340,24 +313,13 @@ class Conv2d(SpModule):
                 o1_plus = self.bn(o1_plus)
                 o1_minus = self.bn(o1_minus)
 
-            print("=" * 80)
-            print("Finally")
-            print("=" * 80)
-
             o1_plus = self._activate(o1_plus)
             o1_minus = self._activate(o1_minus)
-            # print("-"*80)
-            # print("o1_plus:")
-            # print(o1_plus)
-            # print("o1_minus:")
-            # print(o1_minus)
-            # print("-"*80)
             output = (o1_plus + o1_minus) / 2.
-            orig = self._activate(out[:, :cout, :, :])
-            cha = output[0, 0, :, :] - orig[0, 0, :, :]
-            print("output - orig output:")
-            torch.set_printoptions(threshold=5)
-            print(cha)
+
+            out = self.bn(out)
+            out = self._activate(out)
+            # print("orignal output [7,2,0,0]: {}, now {}" .format(out[7,2,0,0], output[7,2,0,0]))
 
         else:
             o1 = out[:, :cout, :, :]
@@ -624,7 +586,9 @@ class Conv2d(SpModule):
         self.module = new_layer
 
     def spffn_active_grow(self, threshold):
+        print(threshold)
         idx = torch.nonzero((self.w <= threshold).float()).view(-1)
+        print("-> active_grow, idx = ", idx)
         # print("self.w = ", self.w.size())
         # print("nonzero w index: ", idx)
 
@@ -712,6 +676,7 @@ class Conv2d(SpModule):
     def spffn_passive_grow(self, split_idx, new_idx):
         n_split = split_idx.shape[0] if split_idx is not None else 0
         n_new = new_idx.shape[0] if new_idx is not None else 0
+        print("-> passive grow: (sp {}, new {})" .format(n_split, n_new))
 
         C_out, C_in, _, _ = self.module.weight.shape
         if self.groups != 1:

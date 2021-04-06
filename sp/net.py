@@ -71,8 +71,8 @@ class SpNet(nn.Module):
         print(">>> Calculate the sp_threshold")
         wlist = torch.cat([self.net[i].w for i in self.layers_to_split]).reshape(-1)
         print("wlist.size = {}".format(wlist.size()))
-        print("--  wlist  --")
-        print(wlist)
+        # print("--  wlist  --")
+        # print(wlist)
         sortedw, sortedidx = torch.sort(wlist)
 
 
@@ -85,6 +85,13 @@ class SpNet(nn.Module):
         print("n_elites = {}" .format(self.n_elites))
         threshold = sortedw[self.n_elites]
         print("threshold = ", threshold)
+        sub = torch.nonzero((sortedw < threshold).float()).view(-1)
+        print("< threshold: ", sub.size())
+        sub = torch.nonzero((sortedw == threshold).float()).view(-1)
+        print("= threshold: ", sub.size())
+        sub = torch.nonzero((sortedw > threshold).float()).view(-1)
+        print("> threshold: ", sub.size())
+
         print("= = = = = = = = = =")
 
         return threshold
@@ -171,6 +178,7 @@ class SpNet(nn.Module):
         elif split_method == 'fireflyn':
             if self.num_group == 1:
                 threshold = self.sp_threshold()
+            # TODO: Split
             for i in reversed(self.layers_to_split):
                 if isinstance(self.net[i], sp.SpModule) and self.net[i].can_split:
                     if self.num_group != 1:
@@ -186,9 +194,10 @@ class SpNet(nn.Module):
                     else:
                         isfirst = False
                     for j in self.next_layers[i]:
+                        print("splitting ({}, {}), (sp {} new {})" .format(i, j, sp_new, (n_new-sp_new)))
                         # print('spffn grow layer {}, split {} neurons,' .format(j, self.net[j].module.weight.shape))
                         self.net[j].spffn_passive_grow(split_idx, new_idx)
-                # print("- - - - - - - - - -")
+                print("- - - - - - - - - -")
 
         else:
             threshold= self.sp_threshold()

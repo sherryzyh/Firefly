@@ -41,9 +41,9 @@ def sp_vgg(model, binary, n_classes=10, dimh=16, method='none'):
                 if binary:
                     # binary network, first layer full-precision
                     if in_channels == 3:
-                        net.append(sp.Conv2d(in_channels, dimh, kernel_size=3, padding=1, actv_fn='none', has_bn=True))
+                        net.append(sp.Conv2d(in_channels, dimh, kernel_size=3, padding=1, actv_fn='relu', has_bn=True))
                     else:
-                        net.append(bi.biConv2d(in_channels, dimh, kernel_size=3, padding=1, actv_fn='none', has_bn=True))
+                        net.append(bi.biConv2d(in_channels, dimh, kernel_size=3, padding=1, actv_fn='relu', has_bn=True))
                 else:
                     # full-precision network
                     net.append(sp.Conv2d(in_channels, dimh, kernel_size=3, padding=1, actv_fn='relu', has_bn=True))
@@ -225,7 +225,9 @@ class Classifier(sp.SpNet):
     def spffn_loss_fn(self, inputs, targets, splitlog, alpha=-1):
         scores = self.spffn_forward(inputs, splitlog, alpha=alpha)
         loss = self.criterion(scores, targets)
-        # print("alpha = {}, scores.size = {}, loss = {}" .format(alpha, scores.size(), loss))
+        # print("     > targets = ", targets.size())
+        # print("     > scores = ", scores)
+        # print("     > loss = ", loss)
         return loss
 
     def spff_loss_fn(self, x, y, alpha=-1):
@@ -309,36 +311,91 @@ class Classifier(sp.SpNet):
         n_batches = len(loader)
 
         # TODO: growing, grad optimization step 1
+        print(">>>> optimization step 1")
         # I think this part notes the step 1 in the grad optimization?
         # The loss function is to update the params (in step 1)
         # But there are constraints
         # The constraints are layer-wise, so in each update iteration,
         # for each layer, the penalty is calculated and back-propped.
         for i, (inputs, targets) in enumerate(loader):
-            if (i>10):
-                break
             inputs, targets = inputs.to(self.device), targets.to(self.device)
             # calculate eq.4 in paper
+            # NOT update y here
+
+            # print("=" * 40)
+            # print("check the v grad")
+            # for j in self.layers_to_split:
+            #     # 一开始这里, v.grad = None
+            #     print("layer {}, v.grad = {}" .format(j, self.net[j].v.grad))
+            #     print("layer {}, v = {}" .format(j, self.net[j].v))
+            # print("before cal loss:")
+            # for j in self.layers_to_split:
+            #     print("loss backward, layer {}, y.grad = {}".format(j, self.net[j].y.grad))
+            #     print("loss backward, layer {}, y = {}".format(j, self.net[j].y))
             loss = self.spffn_loss_fn(inputs, targets, splitlog)
             opt_v.zero_grad()
+            # print("after opt_v.zero_grad:")
+            # for j in self.layers_to_split:
+            #     print("loss backward, layer {}, y.grad = {}".format(j, self.net[j].y.grad))
+            #     print("loss backward, layer {}, y = {}".format(j, self.net[j].y))
             loss.backward()
+            # print("after loss backward")
+            # for j in self.layers_to_split:
+            #     print("loss backward, layer {}, y.grad = {}".format(j, self.net[j].y.grad))
+            #     print("loss backward, layer {}, y = {}".format(j, self.net[j].y))
+            # for j in self.layers_to_split:
+            #     对o1_plus, o1_minus做activate后，v.grad 可以被更新到
+            #     print("loss backward, layer {}, v.grad = {}".format(j, self.net[j].v.grad))
+            #     print("loss backward, layer {}, v = {}".format(j, self.net[j].v))
             for j, layer in enumerate(self.net):
                 if isinstance(layer, sp.SpModule):
                     # transform the hard constraints to a penalty term
+                    # print(">> layer {}" .format(j))
                     layer.spffn_penalty()
+                    # print("-"*80)
             opt_v.step()
+            # print("after step")
+            # for j in self.layers_to_split:
+            #     print("loss backward, layer {}, y.grad = {}".format(j, self.net[j].y.grad))
+            #     print("loss backward, layer {}, y = {}".format(j, self.net[j].y))
+
+        print("="*80)
 
         # TODO: optimization step 2
+        print(">>>> optimization step 2")
+
+        # UPDATE w with v, y(grad of v)
         self.config.granularity = 1
         alphas = np.linspace(0, 1, self.config.granularity * 2 + 1)
         for alpha in alphas[1::2]:
+            # print("alpha = ", alpha)
             for x, y in loader:
                 x, y = x.to(self.device), y.to(self.device)
+                # print("="*40)
+                # print("check the y grad")
+                # for i in self.layers_to_split:
+                #     print("layer {}, y.grad = {}" .format(i, self.net[i].y.grad))
+                #     print("layer {}, y = {}" .format(i, self.net[i].y))
+                #     print("layer {}, v.grad = {}" .format(i, self.net[i].v.grad))
+                #     print("layer {}, v = {}" .format(i, self.net[i].v))
                 loss = self.spffn_loss_fn(x, y, splitlog, alpha=1.0)
-                opt_v.zero_grad()
+                opt_v.zero_grad();
+
                 loss.backward()
+                # print("backpropped")
+                # for i in self.layers_to_split:
+                    # print("layer {}, y.grad = {}" .format(i, self.net[i].y.grad))
+                    # 这里的y都为0
+                    # print("layer {}, y = {}" .format(i, self.net[i].y))
+                    # print("layer {}, v.grad = {}" .format(i, self.net[i].v.grad))
+                    # v.grad每个值，绝对值相同
+                    # print("layer {}, v = {}" .format(i, self.net[i].v))
+                    # print("-"*40)
+
                 for i in self.layers_to_split:
+                    # print("splitting layer {}, granularity = {}, output = False" .format(i, self.config.granularity))
                     self.net[i].spffn_update_w(self.config.granularity * n_batches, output = False)
+                # print("=" * 40)
 
         # print("= = = = = = = = = =")
 
@@ -360,7 +417,7 @@ class Classifier(sp.SpNet):
 
         for i, (inputs, targets) in enumerate(loader):
             inputs, targets = inputs.to(self.device), targets.to(self.device)
-            loss = self.spff_loss_fn(x, y)
+            loss = self.spff_loss_fn(inputs, targets)
             opt_v.zero_grad()
             loss.backward()
             for j in self.layers_to_split:
